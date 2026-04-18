@@ -1,0 +1,141 @@
+{
+  "tasks": [
+    {
+      "id": "mo288dkqeel8e",
+      "name": "每天练习口语和听力",
+      "quadrant": "important",
+      "category": "vocation",
+      "date": "2026-04-18",
+      "duration": 60,
+      "note": "建议每天固定时间进行，如早晨或睡前",
+      "recurrence": "daily",
+      "done": false,
+      "createdAt": "2026-04-17T01:25:46.298Z"
+    },
+    {
+      "id": "mo288dkqjqull",
+      "name": "zzy生日",
+      "quadrant": "urgent-important",
+      "category": "being",
+      "date": "2026-04-19",
+      "duration": 120,
+      "note": "提前准备礼物",
+      "recurrence": "none",
+      "done": false,
+      "createdAt": "2026-04-17T01:25:46.298Z"
+    },
+    {
+      "id": "mo288dkqgrtny",
+      "name": "观看神经网络腾讯会议视频",
+      "quadrant": "neither",
+      "category": "vocation",
+      "date": "2026-04-18",
+      "duration": 60,
+      "note": "建议分段观看，做好笔记",
+      "recurrence": "none",
+      "done": false,
+      "createdAt": "2026-04-17T01:25:46.298Z"
+    },
+    {
+      "id": "mo288dkq1oxws",
+      "name": "完成统计计算HW10",
+      "quadrant": "urgent",
+      "category": "vocation",
+      "date": "2026-04-19",
+      "duration": 30,
+      "note": "建议先理清思路再开始做",
+      "recurrence": "none",
+      "done": false,
+      "createdAt": "2026-04-17T01:25:46.298Z"
+    },
+    {
+      "id": "mo288dkqqg0d8",
+      "name": "完成雅思C18T1写作",
+      "quadrant": "important",
+      "category": "vocation",
+      "date": "2026-04-18",
+      "duration": 90,
+      "note": "建议先列提纲再展开写作",
+      "recurrence": "none",
+      "done": false,
+      "createdAt": "2026-04-17T01:25:46.298Z"
+    },
+    {
+      "id": "mo29axlzllmy0",
+      "name": "与数院同学吃饭并打桌游",
+      "quadrant": "neither",
+      "category": "being",
+      "date": "2026-05-01",
+      "duration": 180,
+      "note": "提前确认时间和地点",
+      "recurrence": "none",
+      "done": false,
+      "createdAt": "2026-04-17T01:55:45.191Z"
+    },
+    {
+      "id": "mo29axlzvk7zk",
+      "name": "hhy生日",
+      "quadrant": "important",
+      "category": "being",
+      "date": "2026-05-02",
+      "duration": 120,
+      "note": "提前准备礼物",
+      "recurrence": "none",
+      "done": false,
+      "createdAt": "2026-04-17T01:55:45.191Z"
+    },
+    {
+      "id": "mo2dc5y6qayrm",
+      "name": "整理个人博客内容并且公开",
+      "quadrant": "important",
+      "category": "vocation",
+      "date": "2026-04-18",
+      "duration": 180,
+      "note": "essay*2 + QQ + 代码库*6",
+      "recurrence": "none",
+      "done": false,
+      "createdAt": "2026-04-17T03:48:41.118Z"
+    },
+    {
+      "id": "mo3qwldytvr7q",
+      "name": "和朋友打台球",
+      "quadrant": "urgent",
+      "category": "being",
+      "date": "2026-04-18",
+      "duration": 120,
+      "note": "建议提前确认时间和地点",
+      "recurrence": "none",
+      "done": false,
+      "createdAt": "2026-04-18T02:56:15.430Z"
+    }
+  ],
+  "schedule": {
+    "2026-04-17": {
+      "11:00": "mo2aukceo0p0s",
+      "15:00": "mo29axlypuycp",
+      "18:00": "mo288dkqvo5p1",
+      "23:00": "mo288dkqgrtny",
+      "14:00": "mo288dkqeel8e",
+      "09:00": "mo2dldmj8kgw2"
+    },
+    "2026-04-18": {
+      "14:00": "mo3qwldytvr7q",
+      "11:00": "mo2dc5y6qayrm"
+    }
+  },
+  "focusLog": [
+    {
+      "date": "2026-04-17",
+      "taskId": "mo2aukceo0p0s",
+      "minutes": 50
+    }
+  ],
+  "settings": {
+    "provider": "qwen",
+    "baseUrl": "",
+    "apiKey": "sk-38e4bc0df9904a448f7c20fba8907908",
+    "model": "qwen-turbo",
+    "focusDuration": 50,
+    "breakDuration": 10
+  }
+}
