@@ -160,6 +160,7 @@
       duration: t.duration || 30,
       note: t.note || '',
       recurrence: t.recurrence || 'none', // none, daily, weekly
+      subtasks: t.subtasks || [],
       done: false,
       createdAt: new Date().toISOString(),
     };
@@ -207,7 +208,7 @@
 
 用户会给你一段杂乱的文字，可能包含待办事项、想法、计划等。请你：
 
-1. **提取并细化任务**：从杂乱文字中提取每一个可执行的任务。如果用户描述模糊（如"准备面试"），帮他拆分成具体的子步骤，每个子步骤作为独立任务。如果已经很具体则保持原样。
+1. **提取并细化任务**：从杂乱文字中提取每一个可执行的任务。如果任务比较庞大或描述模糊（如"准备面试"），请帮他拆分成具体的子步骤，并将这些子步骤放入 \`subtasks\` 数组中。
 
 2. **智能解析日期**：识别文字中的时间信息并转换为具体日期 (YYYY-MM-DD)：
    - "今天" → ${todayStr}
@@ -236,7 +237,7 @@
 7. **重复属性**（recurrence 字段）：如果是每天必须做的选 "daily"；如果是每周重复选 "weekly"；只做一次或不确定为 "none"
 
 请严格返回 JSON 数组格式，不要有其他文字：
-[{"name":"具体任务名","quadrant":"urgent-important","category":"vocation","date":"YYYY-MM-DD","duration":30,"note":"执行建议","recurrence":"none"}]`;
+[{"name":"具体任务名","quadrant":"urgent-important","category":"vocation","date":"YYYY-MM-DD","duration":30,"note":"执行建议","recurrence":"none","subtasks":[{"name":"子步骤1","done":false},{"name":"子步骤2","done":false}]}]`;
 
     try {
       const raw = await callLLM(sysPrompt, text);
@@ -316,6 +317,11 @@
         const catLabel = CAT_LABELS[t.category] || 'Vocation';
         const dateLabel = formatDateShort(t.date);
         const recIcon = t.recurrence === 'daily' ? ' 🔄' : t.recurrence === 'weekly' ? ' 🔁' : '';
+        let subtaskTag = '';
+        if (t.subtasks && t.subtasks.length > 0) {
+          const doneCo = t.subtasks.filter(s => s.done).length;
+          subtaskTag = `<span class="task-meta-tag" style="color:var(--accent);">✓ ${doneCo}/${t.subtasks.length}</span>`;
+        }
         card.innerHTML = `
           <div class="task-card-top">
             <div class="task-checkbox ${t.done ? 'checked' : ''}" data-id="${t.id}"></div>
@@ -325,6 +331,7 @@
             <span class="task-cat-tag ${catClass}">${catLabel}</span>
             ${dateLabel ? '<span class="task-date-tag">' + dateLabel + '</span>' : ''}
             <span class="task-meta-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>${t.duration}分钟</span>
+            ${subtaskTag}
             ${t.note ? '<span class="task-meta-tag">' + esc(t.note.slice(0, 30)) + '</span>' : ''}
           </div>`;
         card.addEventListener('click', (e) => {
@@ -356,9 +363,52 @@
   const editDate = document.getElementById('edit-task-date');
   const editDuration = document.getElementById('edit-task-duration');
   const editNote = document.getElementById('edit-task-note');
+  const editSubtasksList = document.getElementById('edit-subtasks-list');
+  const editNewSubtask = document.getElementById('edit-new-subtask');
+  const btnAddSubtask = document.getElementById('btn-add-subtask');
   const btnModalSave = document.getElementById('btn-modal-save');
   const btnModalDelete = document.getElementById('btn-modal-delete');
   let editingTaskId = null;
+  let currentSubtasks = [];
+
+  function renderSubtasks() {
+    editSubtasksList.innerHTML = '';
+    currentSubtasks.forEach((st, idx) => {
+      const el = document.createElement('div');
+      el.className = 'subtask-item' + (st.done ? ' done' : '');
+      el.innerHTML = `
+        <div class="subtask-checkbox ${st.done ? 'checked' : ''}"></div>
+        <div class="subtask-name">${esc(st.name)}</div>
+        <div class="subtask-remove">&times;</div>
+      `;
+      el.querySelector('.subtask-checkbox').addEventListener('click', () => {
+        st.done = !st.done;
+        renderSubtasks();
+      });
+      el.querySelector('.subtask-remove').addEventListener('click', () => {
+        currentSubtasks.splice(idx, 1);
+        renderSubtasks();
+      });
+      editSubtasksList.appendChild(el);
+    });
+  }
+
+  function handleAddSubtask() {
+    const val = editNewSubtask.value.trim();
+    if (val) {
+      currentSubtasks.push({ name: val, done: false });
+      editNewSubtask.value = '';
+      renderSubtasks();
+    }
+  }
+
+  btnAddSubtask.addEventListener('click', handleAddSubtask);
+  editNewSubtask.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddSubtask();
+    }
+  });
 
   function openEditModal(id) {
     const t = state.tasks.find(x => x.id === id);
@@ -371,6 +421,8 @@
     editDate.value = t.date || todayKey();
     editDuration.value = t.duration;
     editNote.value = t.note || '';
+    currentSubtasks = JSON.parse(JSON.stringify(t.subtasks || [])); // deep copy
+    renderSubtasks();
     modalOverlay.classList.remove('hidden');
   }
 
@@ -387,6 +439,7 @@
       date: editDate.value || todayKey(),
       duration: parseInt(editDuration.value) || 30,
       note: editNote.value.trim(),
+      subtasks: currentSubtasks
     });
     modalOverlay.classList.add('hidden');
     renderBoard();

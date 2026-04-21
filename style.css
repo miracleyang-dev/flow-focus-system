@@ -244,11 +244,11 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 /* ===== MODAL ===== */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:flex;align-items:center;justify-content:center}
 .modal-overlay.hidden{display:none}
-.modal{background:var(--bg-card);border-radius:var(--radius);width:90%;max-width:440px;border:1px solid rgba(255,255,255,.1)}
-.modal-header{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.2rem;border-bottom:1px solid rgba(255,255,255,.06)}
+.modal{background:var(--bg-card);border-radius:var(--radius);width:90%;max-width:440px;border:1px solid rgba(255,255,255,.1);display:flex;flex-direction:column;max-height:90vh}
+.modal-header{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.2rem;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0}
 .modal-header h2{font-size:1.05rem;font-weight:600}
 .modal-close{background:none;border:none;color:var(--text-dim);font-size:1.4rem;cursor:pointer}
-.modal-body{padding:1.2rem}
+.modal-body{padding:1.2rem;overflow-y:auto;flex:1}
 .modal-body .form-row{margin-bottom:1rem}
 .modal-body label{display:block;font-size:.85rem;color:var(--text-dim);margin-bottom:.3rem}
 .modal-body input,.modal-body select,.modal-body textarea{
@@ -256,6 +256,19 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
   padding:.5rem .8rem;border-radius:var(--radius-sm);
 }
 .modal-body textarea{resize:vertical}
+#edit-subtasks-container { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius-sm); padding: 0.8rem; margin-bottom: 0.5rem; }
+#edit-subtasks-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.6rem; }
+.subtask-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+.subtask-item.done { text-decoration: line-through; opacity: 0.5; }
+.subtask-checkbox { width: 14px; height: 14px; border: 1px solid var(--text-muted); border-radius: 3px; cursor: pointer; flex-shrink: 0; display:flex; align-items:center; justify-content:center; }
+.subtask-checkbox.checked { background: var(--green); border-color: var(--green); }
+.subtask-checkbox.checked::after { content: '✓'; color: #fff; font-size: 9px; font-weight: bold; }
+.subtask-name { flex: 1; word-break: break-word; }
+.subtask-remove { color: var(--red); cursor: pointer; opacity: 0.6; padding: 0 0.2rem; }
+.subtask-remove:hover { opacity: 1; }
+.add-subtask-row { display: flex; align-items: center; }
+.add-subtask-row input { flex: 1; background: var(--bg-input); border: 1px solid rgba(255,255,255,0.1); padding: 0.4rem 0.6rem; border-radius: var(--radius-sm); color: var(--text); font-size: 0.85rem; }
+.add-subtask-row input:focus { outline: none; border-color: var(--accent); }
 .modal-footer{display:flex;justify-content:space-between;padding:1rem 1.2rem;border-top:1px solid rgba(255,255,255,.06)}
 
 /* ===== RESPONSIVE ===== */
