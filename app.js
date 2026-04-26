@@ -88,7 +88,7 @@
   function saveState() {
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveToServer, 300);
+    saveTimer = setTimeout(saveToServer, 100);
   }
 
   async function saveToServer() {
@@ -1411,6 +1411,7 @@ ${taskCtx}`;
   }
 
   // ===== INIT =====
+  loadStateFromServer();
   loadSettingsUI();
   totalCompleted = countCompleted();
   dailyMaintenance();
@@ -1418,6 +1419,5 @@ ${taskCtx}`;
   renderBoard();
   renderGantt();
   updateDropsDisplay();
-  loadStateFromServer();
 
 })();
