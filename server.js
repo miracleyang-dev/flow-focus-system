@@ -1,91 +1,88 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const Redis = require('ioredis');
 
-const PORT = process.env.PORT || 3000; 
-const STATIC_DIR = path.join(__dirname);
-const DATA_FILE = path.join(__dirname, 'data.json');
-
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-  '.webmanifest': 'application/manifest+json',
-  '.woff2': 'font/woff2',
-};
-
-// Read request body helper
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => resolve(body));
-    req.on('error', reject);
-  });
+// 自动连接 Railway Redis
+let redis;
+try {
+  redis = new Redis(process.env.REDIS_URL);
+  console.log('✅ Redis 连接成功：数据永久保存');
+} catch (e) {
+  console.log('❌ Redis 连接失败');
 }
 
+// 静态文件 MIME 类型
+const mime = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json'
+};
+
+// 创建服务器
 const server = http.createServer(async (req, res) => {
-  // CORS headers (for local dev)
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+  const { method, url } = req;
 
-  const url = req.url.split('?')[0];
-
-  // ===== API: Load data =====
-  if (url === '/api/data' && req.method === 'GET') {
+  // --------------------------
+  // 🔴 API：获取数据（电脑/手机通用）
+  // --------------------------
+  if (url === '/api/data' && method === 'GET') {
     try {
-      const data = fs.existsSync(DATA_FILE)
-        ? fs.readFileSync(DATA_FILE, 'utf-8')
-        : '{}';
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(data);
-    } catch (e) {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      const data = await redis.get('app_data');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(data || '{}');
+    } catch (err) {
       res.end('{}');
     }
     return;
   }
 
-  // ===== API: Save data =====
-  if (url === '/api/data' && req.method === 'POST') {
-    try {
-      const body = await readBody(req);
-      // validate it's valid JSON & pretty print it for readability
-      const parsed = JSON.parse(body);
-      const prettyJson = JSON.stringify(parsed, null, 2);
-      fs.writeFileSync(DATA_FILE, prettyJson, 'utf-8');
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end('{"ok":true}');
-    } catch (e) {
-      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end('{"error":"Invalid JSON"}');
-    }
+  // --------------------------
+  // 🟢 API：保存数据（自动同步）
+  // --------------------------
+  if (url === '/api/data' && method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        await redis.set('app_data', body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: 1, msg: '✅ 保存成功（永久存储）' }));
+      } catch (err) {
+        res.writeHead(500);
+        res.end('error');
+      }
+    });
     return;
   }
 
-  // ===== Static files =====
-  let filePath = url === '/' ? '/index.html' : decodeURIComponent(url);
-  const fullPath = path.resolve(path.join(STATIC_DIR, filePath));
+  // --------------------------
+  // 静态文件（PWA 正常访问）
+  // --------------------------
+  let filePath = url === '/' ? '/index.html' : url;
+  const ext = path.extname(filePath);
+  filePath = path.join(__dirname, filePath);
 
-  // security: prevent path traversal (ensure path is actually within STATIC_DIR folder)
-  const normalizedStaticDir = STATIC_DIR.endsWith(path.sep) ? STATIC_DIR : STATIC_DIR + path.sep;
-  if (!fullPath.startsWith(normalizedStaticDir) && fullPath !== STATIC_DIR) { 
-    res.writeHead(403); 
-    res.end(); 
-    return; 
-  }
-
-  fs.readFile(fullPath, (err, data) => {
-    if (err) { res.writeHead(404); res.end('Not Found'); return; }
-    const ext = path.extname(fullPath);
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-    res.end(data);
+  fs.readFile(filePath, (err, content) => {
+    if (err) {
+      res.writeHead(404);
+      res.end('404');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': mime[ext] || 'text/html' });
+    res.end(content, 'utf-8');
   });
 });
 
-server.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
+// 端口适配 Railway
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, '0.0.0.0', () => {
+  console.log('🚀 服务启动：端口 ' + PORT);
+});

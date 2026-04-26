@@ -5,9 +5,7 @@
   "scripts": {
     "start": "node server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "PWA 心流专注系统",
-  "dependencies": {}
+  "dependencies": {
+    "ioredis": "^5.4.1"
+  }
 }
