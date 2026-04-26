@@ -1,12 +1,15 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>心流 · 个人效率系统</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0f172a">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="心流">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
@@ -17,9 +20,14 @@
   <div class="sidebar-brand">
     <div class="brand-icon">心</div>
     <span class="brand-text">心流</span>
+    <span class="brand-drops" id="sidebar-drops" title="专注水滴">💧 <span id="sidebar-drops-num">0</span></span>
   </div>
   <ul class="nav-list">
-    <li class="nav-item active" data-view="dump">
+    <li class="nav-item active" data-view="dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+      <span>仪表盘</span>
+    </li>
+    <li class="nav-item" data-view="dump">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18m-6-6l6 6 6-6"/></svg>
       <span>倒空大脑</span>
     </li>
@@ -27,16 +35,21 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
       <span>任务看板</span>
     </li>
-    <li class="nav-item" data-view="today">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-      <span>今日计划</span>
+    <li class="nav-item" data-view="gantt">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z" stroke="none"/><rect x="3" y="3" width="18" height="18" rx="2"/><rect x="6" y="7" width="6" height="2" rx="1" fill="currentColor"/><rect x="10" y="11" width="8" height="2" rx="1" fill="currentColor"/><rect x="7" y="15" width="5" height="2" rx="1" fill="currentColor"/></svg>
+      <span>甘特图</span>
     </li>
-    <li class="nav-item" data-view="focus">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6a6 6 0 1 0 6 6"/><circle cx="12" cy="12" r="2"/></svg>
-      <span>专注模式</span>
+    <li class="nav-item" data-view="chat">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>AI 陪伴</span>
     </li>
   </ul>
   <div class="nav-bottom">
+    <li class="nav-item" id="theme-toggle-btn">
+      <svg id="theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg id="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      <span id="theme-toggle-text">浅色模式</span>
+    </li>
     <li class="nav-item" data-view="settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       <span>设置</span>
@@ -50,7 +63,7 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
   </button>
   <div class="brand-icon-sm">心</div>
-  <span id="mobile-title">倒空大脑</span>
+  <span id="mobile-title">仪表盘</span>
 </header>
 
 <!-- OVERLAY -->
@@ -59,8 +72,72 @@
 <!-- MAIN CONTENT -->
 <main id="main-content">
 
+  <!-- VIEW: DASHBOARD -->
+  <section id="view-dashboard" class="view active">
+    <div class="dash-greeting">
+      <h1 id="dash-greeting-text">早上好</h1>
+      <p class="dash-date" id="dash-date"></p>
+    </div>
+    <div class="dash-quote" id="dash-quote"></div>
+    <div class="dash-stats-grid">
+      <div class="dash-stat-card">
+        <div class="dash-stat-num" id="dash-undone">0</div>
+        <div class="dash-stat-label">待完成</div>
+      </div>
+      <div class="dash-stat-card dash-stat-warn">
+        <div class="dash-stat-num" id="dash-overdue">0</div>
+        <div class="dash-stat-label">已逾期</div>
+      </div>
+      <div class="dash-stat-card">
+        <div class="dash-stat-num" id="dash-today-count">0</div>
+        <div class="dash-stat-label">今日待办</div>
+      </div>
+      <div class="dash-stat-card dash-stat-accent">
+        <div class="dash-stat-num" id="dash-focus-min">0</div>
+        <div class="dash-stat-label">今日完成</div>
+      </div>
+      <div class="dash-stat-card dash-stat-drops">
+        <div class="dash-stat-num" id="dash-drops">💧 0</div>
+        <div class="dash-stat-label">专注水滴</div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="dash-quick-actions" id="dash-quick-actions">
+      <button class="dash-qa-btn" id="qa-quick-add">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        快速添加
+      </button>
+      <button class="dash-qa-btn" id="qa-ai-chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        AI 聊天
+      </button>
+    </div>
+    <!-- Quick Add Inline -->
+    <div class="dash-quick-add-inline hidden" id="dash-quick-add-inline">
+      <input type="text" id="qa-task-input" placeholder="输入任务名称，按回车添加...">
+      <button id="qa-task-submit" class="btn-primary" style="padding:.45rem .8rem">添加</button>
+      <button id="qa-task-cancel" class="btn-ghost" style="padding:.45rem .8rem">取消</button>
+    </div>
+
+    <!-- Quick Links -->
+    <div class="dash-section" id="dash-links-section">
+      <h3>常用链接</h3>
+      <div id="dash-links" class="dash-links"></div>
+    </div>
+
+    <div class="dash-section">
+      <h3>今日任务</h3>
+      <div id="dash-today-tasks" class="dash-task-list"></div>
+    </div>
+    <div class="dash-section" id="dash-overdue-section" style="display:none">
+      <h3 style="color:var(--red)">逾期任务</h3>
+      <div id="dash-overdue-tasks" class="dash-task-list"></div>
+    </div>
+  </section>
+
   <!-- VIEW: DUMP -->
-  <section id="view-dump" class="view active">
+  <section id="view-dump" class="view">
     <div class="view-header">
       <h1>倒空大脑</h1>
       <p class="view-desc">把脑子里所有的事都写下来，不用管顺序，AI帮你理清楚。</p>
@@ -85,101 +162,79 @@
   <section id="view-board" class="view">
     <div class="view-header">
       <h1>任务看板</h1>
-      <p class="view-desc">四象限视图，一眼看清轻重缓急。</p>
-      <div class="board-filters">
-        <button class="cat-filter active" data-cat="all">全部</button>
-        <button class="cat-filter" data-cat="vocation"><span class="cat-dot cat-vocation"></span>Vocation</button>
-        <button class="cat-filter" data-cat="being"><span class="cat-dot cat-being"></span>Being</button>
-        <button class="cat-filter" data-cat="romance"><span class="cat-dot cat-romance"></span>Romance</button>
+      <p class="view-desc">按优先级排列，一眼看清轻重缓急。</p>
+      <div class="board-filters" id="board-filters">
+        <!-- Rendered by JS (tag-based filters) -->
       </div>
     </div>
-    <div class="board-grid">
-      <div class="board-quadrant q1" data-quadrant="urgent-important">
-        <div class="q-header"><span class="q-dot q1-dot"></span>紧急且重要 <span class="q-badge" data-count="q1">0</span></div>
-        <div class="q-body" data-drop="urgent-important"></div>
-      </div>
-      <div class="board-quadrant q2" data-quadrant="important">
-        <div class="q-header"><span class="q-dot q2-dot"></span>重要不紧急 <span class="q-badge" data-count="q2">0</span></div>
-        <div class="q-body" data-drop="important"></div>
-      </div>
-      <div class="board-quadrant q3" data-quadrant="urgent">
-        <div class="q-header"><span class="q-dot q3-dot"></span>紧急不重要 <span class="q-badge" data-count="q3">0</span></div>
-        <div class="q-body" data-drop="urgent"></div>
-      </div>
-      <div class="board-quadrant q4" data-quadrant="neither">
-        <div class="q-header"><span class="q-dot q4-dot"></span>不紧急不重要 <span class="q-badge" data-count="q4">0</span></div>
-        <div class="q-body" data-drop="neither"></div>
-      </div>
+    <div class="board-list" id="board-list">
+      <!-- Rendered by JS -->
     </div>
   </section>
 
-  <!-- VIEW: TODAY -->
-  <section id="view-today" class="view">
+  <!-- VIEW: GANTT -->
+  <section id="view-gantt" class="view">
     <div class="view-header">
-      <h1 id="today-title">今日计划</h1>
-      <p class="view-desc">只关注今天。昨天没做完的任务会自动搬过来。</p>
-      <div id="migrated-notice" class="migrated-notice hidden"></div>
-      <div class="today-actions">
-        <button id="btn-ai-schedule" class="btn-primary">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 22l-.75-12.07A4.001 4.001 0 0 1 12 2z"/></svg>
-          AI 智能排期
-        </button>
-        <div class="energy-selector">
-          <label>当前精力：</label>
-          <select id="energy-level">
-            <option value="high">充沛</option>
-            <option value="medium" selected>一般</option>
-            <option value="low">较低</option>
-          </select>
-        </div>
-      </div>
+      <h1>甘特图</h1>
+      <p class="view-desc">以时间轴查看任务分布，洞察未来两周的安排。</p>
     </div>
-    <div class="today-layout">
-      <div class="timeline" id="timeline">
-        <!-- Time blocks rendered by JS -->
-      </div>
-      <div class="unscheduled-panel">
-        <h3>待安排任务</h3>
-        <div id="unscheduled-tasks"></div>
-      </div>
+    <div class="gantt-container" id="gantt-container">
+      <!-- Rendered by JS -->
     </div>
   </section>
 
-  <!-- VIEW: FOCUS -->
-  <section id="view-focus" class="view">
+  <!-- VIEW: CHAT -->
+  <section id="view-chat" class="view">
     <div class="view-header">
-      <h1>专注模式</h1>
-      <p class="view-desc">选一件事，专注做完它。</p>
+      <h1>AI 陪伴</h1>
+      <p class="view-desc">聊聊当下的状态，让 AI 帮你理清思路、找回动力。</p>
     </div>
-    <div class="focus-container">
-      <div id="focus-task-selector" class="focus-task-selector">
-        <p class="selector-label">选择要专注的任务：</p>
-        <div id="focus-task-list" class="focus-task-list"></div>
-        <button id="btn-free-focus" class="btn-ghost" style="margin-top:.6rem;width:100%">自由专注（不选任务）</button>
+    <div class="chat-container">
+      <!-- Chat toolbar -->
+      <div class="chat-toolbar" id="chat-toolbar">
+        <div class="chat-toolbar-left">
+          <button class="chat-tb-btn" id="btn-chat-clear" title="清空对话">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+            清空对话
+          </button>
+          <button class="chat-tb-btn" id="btn-chat-select" title="选择收藏">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+            收藏对话
+          </button>
+        </div>
+        <div class="chat-toolbar-right">
+          <button class="chat-tb-btn" id="btn-chat-saved" title="查看收藏">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+            收藏夹
+          </button>
+        </div>
       </div>
-      <div id="focus-active-area" class="focus-active-area hidden">
-        <div id="focus-task-name" class="focus-task-name">自由专注</div>
-        <div class="focus-timer">
-          <svg class="timer-ring" viewBox="0 0 200 200">
-            <circle class="timer-bg" cx="100" cy="100" r="90"/>
-            <circle class="timer-progress" cx="100" cy="100" r="90" id="timer-progress"/>
-          </svg>
-          <div class="timer-display" id="timer-display">25:00</div>
-        </div>
-        <div class="focus-controls">
-          <button id="btn-focus-start" class="btn-primary">开始专注</button>
-          <button id="btn-focus-pause" class="btn-secondary hidden">暂停</button>
-          <button id="btn-focus-stop" class="btn-ghost hidden">结束</button>
+      <!-- Selection mode bar (hidden by default) -->
+      <div class="chat-select-bar hidden" id="chat-select-bar">
+        <span class="csb-hint">勾选要收藏的对话，然后点击保存</span>
+        <div class="csb-actions">
+          <button class="btn-primary" id="btn-chat-save-selected" style="padding:.35rem .8rem;font-size:.82rem">保存收藏</button>
+          <button class="btn-ghost" id="btn-chat-cancel-select" style="padding:.35rem .8rem;font-size:.82rem">取消</button>
         </div>
       </div>
-      <div class="focus-stats">
-        <div class="stat-item">
-          <div class="stat-val" id="stat-today-focus">0</div>
-          <div class="stat-label">今日专注 (分钟)</div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-msg ai" data-idx="init">
+          <div class="chat-avatar">AI</div>
+          <div class="chat-bubble">嗨，我已经看过你的任务列表了。有什么想聊的吗？不管是工作压力、拖延症，还是不知道该先做什么，都可以跟我说。</div>
         </div>
-        <div class="stat-item">
-          <div class="stat-val" id="stat-sessions">0</div>
-          <div class="stat-label">完成番茄数</div>
+      </div>
+      <div class="chat-input-area">
+        <div class="chat-quick-actions">
+          <button class="chat-quick-btn" data-prompt="我现在不想干活，帮我找找动力">不想干活</button>
+          <button class="chat-quick-btn" data-prompt="帮我分析一下我的任务，哪些该优先做">分析任务</button>
+          <button class="chat-quick-btn" data-prompt="我感觉很焦虑，事情太多了">感觉焦虑</button>
+          <button class="chat-quick-btn" data-prompt="帮我做一个今天的行动计划">今日计划</button>
+        </div>
+        <div class="chat-input-row">
+          <textarea id="chat-input" placeholder="说说你现在的状态..." rows="1"></textarea>
+          <button id="btn-chat-send" class="btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -192,6 +247,15 @@
       <p class="view-desc">配置你的 AI 助手和偏好。</p>
     </div>
     <div class="settings-form">
+      <!-- User Info -->
+      <div class="setting-group">
+        <h3>个人信息</h3>
+        <div class="setting-row">
+          <label for="setting-user-name">你的名字</label>
+          <input type="text" id="setting-user-name" placeholder="输入你的名字">
+        </div>
+      </div>
+
       <div class="setting-group">
         <h3>AI 配置</h3>
         <div class="setting-row">
@@ -223,17 +287,34 @@
         <button id="btn-test-ai" class="btn-secondary">测试连接</button>
         <div id="ai-test-result" class="test-result"></div>
       </div>
+      <!-- Tags -->
       <div class="setting-group">
-        <h3>专注设置</h3>
-        <div class="setting-row">
-          <label for="focus-duration">番茄时长 (分钟)</label>
-          <input type="number" id="focus-duration" value="25" min="5" max="120">
-        </div>
-        <div class="setting-row">
-          <label for="break-duration">休息时长 (分钟)</label>
-          <input type="number" id="break-duration" value="5" min="1" max="30">
+        <h3>标签管理</h3>
+        <div id="tag-manager-list"></div>
+        <div class="setting-row" style="display:flex;gap:.4rem;margin-top:.5rem;align-items:flex-end">
+          <div style="flex:1">
+            <label for="tag-new-name">标签名称</label>
+            <input type="text" id="tag-new-name" placeholder="新标签名">
+          </div>
+          <div style="width:60px">
+            <label for="tag-new-color">颜色</label>
+            <input type="color" id="tag-new-color" value="#6366f1" style="width:100%;height:36px;padding:2px;cursor:pointer">
+          </div>
+          <button id="btn-add-tag" class="btn-secondary" style="white-space:nowrap;margin-bottom:0">添加</button>
         </div>
       </div>
+
+      <!-- Quick Links -->
+      <div class="setting-group">
+        <h3>常用链接</h3>
+        <div id="links-manager-list"></div>
+        <div class="setting-row" style="display:flex;gap:.4rem;margin-top:.5rem">
+          <input type="text" id="link-new-name" placeholder="名称" style="flex:1">
+          <input type="url" id="link-new-url" placeholder="https://..." style="flex:2">
+          <button id="btn-add-link" class="btn-secondary" style="white-space:nowrap">添加</button>
+        </div>
+      </div>
+
       <div class="setting-group">
         <h3>数据管理</h3>
         <button id="btn-export" class="btn-secondary">导出数据 (JSON)</button>
@@ -259,20 +340,16 @@
         <input type="text" id="edit-task-name">
       </div>
       <div class="form-row">
-        <label>Being分类</label>
-        <select id="edit-task-category">
-          <option value="vocation">Vocation（工作/学习/职业）</option>
-          <option value="being">Being（兴趣/社交/日常）</option>
-          <option value="romance">Romance（爱情/家庭）</option>
-        </select>
+        <label>标签</label>
+        <div id="edit-task-tags" class="tag-chip-selector"></div>
       </div>
       <div class="form-row">
         <label>优先级</label>
         <select id="edit-task-quadrant">
-          <option value="urgent-important">紧急且重要</option>
-          <option value="important">重要不紧急</option>
-          <option value="urgent">紧急不重要</option>
-          <option value="neither">不紧急不重要</option>
+          <option value="urgent-important">紧急重要</option>
+          <option value="important">重要</option>
+          <option value="urgent">紧急</option>
+          <option value="neither">一般</option>
         </select>
       </div>
       <div class="form-row">
@@ -286,6 +363,10 @@
       <div class="form-row">
         <label>日期</label>
         <input type="date" id="edit-task-date">
+      </div>
+      <div class="form-row">
+        <label>时间（选填）</label>
+        <input type="time" id="edit-task-time" placeholder="如 09:00">
       </div>
       <div class="form-row">
         <label>预估时间 (分钟)</label>
@@ -313,6 +394,63 @@
   </div>
 </div>
 
+<!-- SAVED CHATS MODAL -->
+<div id="saved-chats-overlay" class="modal-overlay hidden">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <h2>对话收藏夹</h2>
+      <button class="modal-close" id="saved-chats-close">&times;</button>
+    </div>
+    <div class="modal-body" id="saved-chats-list" style="max-height:60vh;overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- DROPS RULES MODAL -->
+<div id="drops-rules-overlay" class="modal-overlay hidden">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <h2>💧 专注水滴规则</h2>
+      <button class="modal-close" id="drops-rules-close">&times;</button>
+    </div>
+    <div class="modal-body drops-rules-body">
+      <div class="drops-rule-section">
+        <h4>什么是水滴？</h4>
+        <p>水滴是你行动力的量化印记。每完成一个任务，你都会获得水滴奖励。积少成多，见证自己的成长。</p>
+      </div>
+      <div class="drops-rule-section">
+        <h4>完成任务获得水滴</h4>
+        <p>公式：<code>floor(预估时间 / 60 × 优先级权重)</code></p>
+        <div class="drops-weight-table">
+          <div class="drops-weight-row"><span class="dw-label" style="color:var(--q1)">紧急重要</span><span class="dw-val">×4</span></div>
+          <div class="drops-weight-row"><span class="dw-label" style="color:var(--q2)">重要</span><span class="dw-val">×3</span></div>
+          <div class="drops-weight-row"><span class="dw-label" style="color:var(--q3)">紧急</span><span class="dw-val">×2</span></div>
+          <div class="drops-weight-row"><span class="dw-label" style="color:var(--q4)">一般</span><span class="dw-val">×1</span></div>
+        </div>
+        <p class="drops-example">例：完成一个 30 分钟的「紧急重要」任务 = floor(30/60 × 4) = <strong>2 滴</strong></p>
+      </div>
+      <div class="drops-rule-section">
+        <h4>里程碑庆祝</h4>
+        <p>每累积 <strong>100 滴</strong> 水滴，会触发一次水滴庆祝动画，是你坚持行动的见证。</p>
+      </div>
+      <div class="drops-rule-section drops-current">
+        <h4>当前水滴</h4>
+        <div class="drops-current-num" id="drops-rules-total">0</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CELEBRATION OVERLAY -->
+<div id="celebrate-overlay" class="celebrate-overlay hidden">
+  <canvas id="confetti-canvas"></canvas>
+  <div class="celebrate-msg" id="celebrate-msg"></div>
+</div>
+
 <script src="/app.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+</script>
 </body>
 </html>

@@ -13,6 +13,8 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
+  '.webmanifest': 'application/manifest+json',
+  '.woff2': 'font/woff2',
 };
 
 // Read request body helper
@@ -67,11 +69,16 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ===== Static files =====
-  let filePath = url === '/' ? '/index.html' : url;
-  const fullPath = path.join(STATIC_DIR, filePath);
+  let filePath = url === '/' ? '/index.html' : decodeURIComponent(url);
+  const fullPath = path.resolve(path.join(STATIC_DIR, filePath));
 
-  // security: prevent path traversal
-  if (!fullPath.startsWith(STATIC_DIR)) { res.writeHead(403); res.end(); return; }
+  // security: prevent path traversal (ensure path is actually within STATIC_DIR folder)
+  const normalizedStaticDir = STATIC_DIR.endsWith(path.sep) ? STATIC_DIR : STATIC_DIR + path.sep;
+  if (!fullPath.startsWith(normalizedStaticDir) && fullPath !== STATIC_DIR) { 
+    res.writeHead(403); 
+    res.end(); 
+    return; 
+  }
 
   fs.readFile(fullPath, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not Found'); return; }
