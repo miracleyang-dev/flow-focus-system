@@ -2,7 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000; 
 const STATIC_DIR = path.join(__dirname);
 const DATA_FILE = path.join(__dirname, 'data.json');
 
