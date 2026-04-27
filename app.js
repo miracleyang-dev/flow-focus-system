@@ -7,6 +7,11 @@
   // ===== STATE =====
   const STATE_KEY = 'xinliu_state';
   let state = loadStateSync();
+  // Bootstrap lastModified for legacy local data
+  if (!state.lastModified && (state.tasks || []).length > 0) {
+    state.lastModified = Date.now();
+    localStorage.setItem(STATE_KEY, JSON.stringify(state));
+  }
   let saveTimer = null;
   let serverLoaded = false; // 防止服务端数据加载前覆盖 Redis
 
@@ -96,6 +101,8 @@
 
           if (useServer) {
             state = mergeState(data);
+            // Bootstrap lastModified if server data has none (legacy data)
+            if (!state.lastModified) state.lastModified = Date.now();
             localStorage.setItem(STATE_KEY, JSON.stringify(state));
             console.log('[心流] 从服务端加载数据成功，任务数:', (state.tasks || []).length);
           } else {
@@ -142,11 +149,33 @@
   let isSaving = false; // Flag to prevent poll during active save
 
   function computeStateHash() {
-    // Comprehensive hash based on all meaningful state fields
-    const taskSig = (state.tasks || []).map(t => t.id + (t.done ? '1' : '0') + (t.sortOrder || 0) + (t.name || '') + (t.date || '') + (t.quadrant || '') + (t.note || '') + (t.tags || []).join(',')).join('|');
-    const tagSig = (state.tags || []).map(t => t.id + t.name + t.color).join('|');
-    const linkSig = (state.links || []).map(l => l.id + l.name + l.url).join('|');
-    return taskSig + '##' + tagSig + '##' + linkSig + '##' + ((state.drops || {}).total || 0);
+    // Fast fingerprint: task count + tag count + link count + drops total + stringify length
+    const tasks = state.tasks || [];
+    const tags = state.tags || [];
+    const links = state.links || [];
+    const dropsTotal = (state.drops || {}).total || 0;
+    const taskSig = tasks.map(t => t.id + (t.done ? '1' : '0') + (t.sortOrder || 0) + (t.name || '') + (t.date || '') + (t.quadrant || '') + (t.note || '') + (t.tags || []).join(',')).join('|');
+    const tagSig = tags.map(t => t.id + t.name + t.color).join('|');
+    const linkSig = links.map(l => l.id + l.name + l.url).join('|');
+    return taskSig + '##' + tagSig + '##' + linkSig + '##' + dropsTotal;
+  }
+
+  // Cheap check: compare counts/totals before expensive full hash
+  function quickStateFingerprint(data) {
+    return (data.tasks || []).length + ':' + (data.tags || []).length + ':' + (data.links || []).length + ':' + ((data.drops || {}).total || 0);
+  }
+
+  function getActiveViewName() {
+    const activeNav = document.querySelector('.nav-item.active');
+    return activeNav ? activeNav.dataset.view : 'board';
+  }
+
+  function renderActiveView() {
+    const v = getActiveViewName();
+    if (v === 'dashboard') renderDashboard();
+    else if (v === 'board') renderBoard();
+    else if (v === 'gantt') renderGantt();
+    else if (v === 'settings') { loadSettingsUI(); renderSettingsLists(); }
   }
 
   async function pollServerSync() {
@@ -177,17 +206,21 @@
           state = mergeState(data);
           lastSyncHash = computeStateHash();
           localStorage.setItem(STATE_KEY, JSON.stringify(state));
-          renderDashboard();
-          renderBoard();
-          renderGantt();
+          renderActiveView();
           updateDropsDisplay();
-          loadSettingsUI();
         } else {
           // Server lost data, push local data back
           console.log('[心流] 服务端数据为空但本地有数据，推送本地数据');
           saveToServer();
         }
         return;
+      }
+
+      // Quick fingerprint check — skip expensive sig building if counts unchanged and timestamps equal
+      const serverFP = quickStateFingerprint(data);
+      const localFP = quickStateFingerprint(state);
+      if (serverFP === localFP && serverTime === localTime && serverTime > 0) {
+        return; // Counts and timestamps identical — very likely no change
       }
 
       // Build signatures to detect any change
@@ -198,10 +231,22 @@
       const localSig = computeStateHash();
 
       // No change detected
-      if (serverSig === localSig) return;
+      if (serverSig === localSig) {
+        // Signatures match but sync lastModified if server is newer (bootstrap)
+        if (serverTime > localTime) {
+          state.lastModified = serverTime;
+          localStorage.setItem(STATE_KEY, JSON.stringify(state));
+        }
+        return;
+      }
 
-      // Only accept server data if it's actually newer
-      if (serverTime <= localTime) {
+      // Both timestamps are 0 or missing (legacy data) — use signature comparison
+      // to decide; since sigs differ, accept server data to bootstrap sync
+      if (serverTime === 0 && localTime === 0) {
+        console.log('[心流] 首次同步（无时间戳），使用签名比较同步...');
+        // Fall through to accept server data below
+      } else if (serverTime <= localTime) {
+        // Server is older or same — don't overwrite local
         return;
       }
 
@@ -209,12 +254,9 @@
       state = mergeState(data);
       lastSyncHash = computeStateHash();
       localStorage.setItem(STATE_KEY, JSON.stringify(state));
-      // Re-render all views
-      renderDashboard();
-      renderBoard();
-      renderGantt();
+      // Smart re-render: only update the currently active view to avoid mobile lag
+      renderActiveView();
       updateDropsDisplay();
-      loadSettingsUI();
     } catch (e) {
       // Silently fail - will retry next interval
     }
@@ -1314,6 +1356,7 @@ ${taskCtx}`;
     saveSettings();
   });
 
+  let settingsSaveTimer = null;
   function saveSettings() {
     state.settings.provider = providerSelect.value;
     state.settings.baseUrl = baseUrlInput.value.trim().replace(/\/+$/, '');
@@ -1321,7 +1364,9 @@ ${taskCtx}`;
     state.settings.model = modelInput.value.trim();
     if (!state.userInfo) state.userInfo = {};
     state.userInfo.name = userNameInput.value.trim();
-    saveState();
+    // Debounce: only persist after 600ms of inactivity (avoid per-keystroke saves)
+    clearTimeout(settingsSaveTimer);
+    settingsSaveTimer = setTimeout(() => saveState(), 600);
   }
 
   [apiKeyInput, baseUrlInput, modelInput, userNameInput].forEach(el => {

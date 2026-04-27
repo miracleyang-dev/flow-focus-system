@@ -1,5 +1,5 @@
 // ===== 心流 PWA Service Worker =====
-const CACHE_NAME = 'xinliu-v7';
+const CACHE_NAME = 'xinliu-v8';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -57,30 +57,24 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: cache first, then network
+  // Static assets: cache first, then network (stale-while-revalidate)
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      if (cached) {
-        // Return cache immediately, but also update cache in background
-        const fetchPromise = fetch(event.request).then((response) => {
-          if (response && response.status === 200) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return response;
-        }).catch(() => {});
-        // Don't await — return cached version immediately
-        fetchPromise;
-        return cached;
-      }
-      // Not in cache: fetch from network and cache it
-      return fetch(event.request).then((response) => {
+      // Always fetch in background to update cache
+      const networkFetch = fetch(event.request).then((response) => {
         if (response && response.status === 200) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return response;
-      });
+      }).catch(() => cached); // fallback to cached on network error
+
+      // If cached, return immediately (network updates cache in background)
+      if (cached) {
+        return cached;
+      }
+      // Not in cache: wait for network
+      return networkFetch;
     })
   );
 });
