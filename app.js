@@ -96,6 +96,8 @@
     // 服务端加载完成后，再执行每日维护
     dailyMaintenance();
     checkServerHealth();
+    // 启动跨设备同步轮询
+    startSyncPolling();
   }
 
   async function checkServerHealth() {
@@ -113,8 +115,65 @@
     } catch (e) { /* ignore */ }
   }
 
+  // ===== CROSS-DEVICE SYNC POLLING =====
+  let syncPollInterval = null;
+  let lastSyncHash = '';
+
+  function computeStateHash() {
+    // Simple hash based on task count, last modified timestamps, and tags
+    const taskSig = (state.tasks || []).map(t => t.id + (t.done ? '1' : '0') + (t.sortOrder || 0) + (t.name || '')).join('|');
+    const tagSig = (state.tags || []).map(t => t.id + t.color).join('|');
+    return taskSig + '##' + tagSig;
+  }
+
+  async function pollServerSync() {
+    if (!serverLoaded) return;
+    // Don't poll while a save is pending
+    if (saveTimer) return;
+    try {
+      const res = await fetch('/api/data');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || !data.tasks) return;
+
+      // Build signatures to detect any change
+      const serverSig = (data.tasks || []).map(t => t.id + (t.done ? '1' : '0') + (t.sortOrder || 0) + (t.name || '')).join('|')
+        + '##' + (data.tags || []).map(t => t.id + t.color).join('|');
+      const localSig = computeStateHash();
+
+      if (serverSig !== localSig && serverSig !== lastSyncHash) {
+        // Server has different data from another device
+        console.log('[心流] 检测到服务端数据变化，同步中...');
+        state = mergeState(data);
+        lastSyncHash = computeStateHash();
+        localStorage.setItem(STATE_KEY, JSON.stringify(state));
+        // Re-render all views
+        renderDashboard();
+        renderBoard();
+        renderGantt();
+        updateDropsDisplay();
+        loadSettingsUI();
+      }
+    } catch (e) {
+      // Silently fail - will retry next interval
+    }
+  }
+
+  function startSyncPolling() {
+    lastSyncHash = computeStateHash();
+    // Poll every 3 seconds for cross-device sync
+    syncPollInterval = setInterval(pollServerSync, 3000);
+    // Also sync on visibility change (when user switches back to tab/app)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        pollServerSync();
+      }
+    });
+  }
+
   function saveState() {
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
+    lastSyncHash = computeStateHash(); // Update hash so polling doesn't overwrite our own changes
     // 只有服务端数据加载完成后，才允许写回服务端
     if (!serverLoaded) {
       console.log('[心流] 服务端未就绪，仅保存到 localStorage');
@@ -463,7 +522,7 @@
     return `<span class="deadline-tag" style="background:${c.bg};color:${c.color}">${c.text}</span>`;
   }
 
-  // ===== DRAG & DROP =====
+  // ===== DRAG & DROP (Desktop) =====
   let dragSrcId = null;
 
   function handleDragStart(e) {
@@ -497,6 +556,111 @@
     this.classList.remove('dragging');
     document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
     dragSrcId = null;
+  }
+
+  // ===== TOUCH DRAG & DROP (Mobile) =====
+  let touchDragCard = null;
+  let touchDragId = null;
+  let touchStartY = 0;
+  let touchStartX = 0;
+  let touchClone = null;
+  let touchDragging = false;
+  const TOUCH_DRAG_THRESHOLD = 10; // px before drag starts
+
+  function handleTouchStart(e) {
+    // Only start drag from the drag handle
+    const handle = e.target.closest('.drag-handle');
+    if (!handle) return;
+    const card = handle.closest('.task-card');
+    if (!card || card.classList.contains('done')) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    touchStartY = touch.clientY;
+    touchStartX = touch.clientX;
+    touchDragCard = card;
+    touchDragId = card.dataset.id;
+    touchDragging = false;
+  }
+
+  function handleTouchMove(e) {
+    if (!touchDragCard) return;
+    const touch = e.touches[0];
+    const dy = Math.abs(touch.clientY - touchStartY);
+    const dx = Math.abs(touch.clientX - touchStartX);
+
+    // Start dragging after threshold
+    if (!touchDragging && (dy > TOUCH_DRAG_THRESHOLD || dx > TOUCH_DRAG_THRESHOLD)) {
+      touchDragging = true;
+      touchDragCard.classList.add('dragging');
+      // Create floating clone
+      touchClone = touchDragCard.cloneNode(true);
+      touchClone.classList.add('touch-drag-clone');
+      touchClone.style.position = 'fixed';
+      touchClone.style.width = touchDragCard.offsetWidth + 'px';
+      touchClone.style.zIndex = '1000';
+      touchClone.style.pointerEvents = 'none';
+      touchClone.style.opacity = '0.85';
+      touchClone.style.boxShadow = '0 8px 25px rgba(0,0,0,0.3)';
+      touchClone.style.transform = 'scale(1.02)';
+      touchClone.style.transition = 'none';
+      document.body.appendChild(touchClone);
+    }
+
+    if (!touchDragging) return;
+    e.preventDefault();
+
+    // Position the clone
+    if (touchClone) {
+      touchClone.style.left = '1rem';
+      touchClone.style.right = '1rem';
+      touchClone.style.top = (touch.clientY - touchDragCard.offsetHeight / 2) + 'px';
+    }
+
+    // Find drop target
+    // Temporarily hide clone to get element underneath
+    if (touchClone) touchClone.style.display = 'none';
+    const elemBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+    if (touchClone) touchClone.style.display = '';
+
+    // Clear previous drag-over
+    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+
+    if (elemBelow) {
+      const targetCard = elemBelow.closest('.task-card');
+      if (targetCard && targetCard.dataset.id !== touchDragId && !targetCard.classList.contains('done')) {
+        targetCard.classList.add('drag-over');
+      }
+    }
+  }
+
+  function handleTouchEnd(e) {
+    if (!touchDragCard) return;
+
+    if (touchDragging) {
+      // Find the current drag-over target
+      const overCard = document.querySelector('.task-card.drag-over');
+      if (overCard) {
+        const targetId = overCard.dataset.id;
+        const srcIdx = state.tasks.findIndex(t => t.id === touchDragId);
+        const tgtIdx = state.tasks.findIndex(t => t.id === targetId);
+        if (srcIdx !== -1 && tgtIdx !== -1) {
+          const [moved] = state.tasks.splice(srcIdx, 1);
+          state.tasks.splice(tgtIdx, 0, moved);
+          state.tasks.forEach((t, i) => t.sortOrder = i);
+          saveState();
+        }
+      }
+    }
+
+    // Cleanup
+    if (touchClone) { touchClone.remove(); touchClone = null; }
+    if (touchDragCard) touchDragCard.classList.remove('dragging');
+    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    touchDragCard = null;
+    touchDragId = null;
+    touchDragging = false;
+
+    if (document.querySelector('.task-card.drag-over') || true) renderBoard();
   }
 
   function renderBoard() {
@@ -553,6 +717,8 @@
       card.addEventListener('dragleave', handleDragLeave);
       card.addEventListener('drop', handleDrop);
       card.addEventListener('dragend', handleDragEnd);
+      // Mobile touch drag
+      card.addEventListener('touchstart', handleTouchStart, { passive: false });
       card.addEventListener('click', (e) => {
         if (e.target.classList.contains('task-checkbox')) { toggleDone(t.id); return; }
         if (e.target.classList.contains('drag-handle')) return;
@@ -1129,7 +1295,16 @@ ${taskCtx}`;
     (state.tags || []).forEach((tag, idx) => {
       const el = document.createElement('div');
       el.className = 'setting-list-item';
-      el.innerHTML = `<span class="sli-dot" style="background:${tag.color}"></span><span class="sli-label">${esc(tag.name)}</span><span class="sli-remove">&times;</span>`;
+      el.innerHTML = `<input type="color" class="sli-color-picker" value="${tag.color}" title="点击修改颜色"><span class="sli-label">${esc(tag.name)}</span><span class="sli-remove">&times;</span>`;
+      el.querySelector('.sli-color-picker').addEventListener('input', (e) => {
+        tag.color = e.target.value;
+        saveState();
+      });
+      el.querySelector('.sli-color-picker').addEventListener('change', (e) => {
+        tag.color = e.target.value;
+        saveState();
+        renderBoard();
+      });
       el.querySelector('.sli-remove').addEventListener('click', () => {
         if (!confirm('删除标签 "' + tag.name + '"？任务中的此标签也会被移除。')) return;
         const tagId = tag.id;
@@ -1476,6 +1651,10 @@ ${taskCtx}`;
   }
 
   // ===== INIT =====
+  // Global touch event listeners for mobile drag
+  document.addEventListener('touchmove', handleTouchMove, { passive: false });
+  document.addEventListener('touchend', handleTouchEnd);
+
   // 先用本地数据渲染（避免白屏），然后异步加载服务端数据覆盖
   loadSettingsUI();
   totalCompleted = countCompleted();

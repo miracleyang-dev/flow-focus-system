@@ -166,6 +166,19 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .task-card.dragging{opacity:.35;transform:scale(.97)}
 .task-card.drag-over{border-color:var(--accent) !important;box-shadow:0 0 0 1px var(--accent)}
 
+/* Touch drag clone */
+.touch-drag-clone{border:2px solid var(--accent);border-radius:var(--radius-sm);background:var(--bg-card)}
+
+/* Tag color picker in settings */
+.sli-color-picker{
+  width:24px;height:24px;border:2px solid var(--border-mid);border-radius:6px;
+  cursor:pointer;padding:0;flex-shrink:0;background:none;
+  -webkit-appearance:none;appearance:none;
+}
+.sli-color-picker::-webkit-color-swatch-wrapper{padding:0}
+.sli-color-picker::-webkit-color-swatch{border:none;border-radius:4px}
+.sli-color-picker::-moz-color-swatch{border:none;border-radius:4px}
+
 /* ===== TAG CHIP SELECTOR (in modal) ===== */
 .tag-chip-selector{display:flex;flex-wrap:wrap;gap:.4rem}
 .tag-chip{
@@ -457,6 +470,18 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
   .gantt-label-col{width:120px}
   .view-header h1{font-size:1.3rem}
   .setting-group{padding:1rem}
+  /* Mobile drag handle - larger touch target */
+  .drag-handle{
+    font-size:1.3rem;padding:.4rem .3rem;opacity:.6;
+    touch-action:none;-webkit-touch-callout:none;
+  }
+  /* Better touch targets for task cards */
+  .task-checkbox{width:22px;height:22px}
+  .task-card-top{gap:.6rem}
+  /* Tag color picker larger on mobile */
+  .sli-color-picker{width:30px;height:30px}
+  /* Settings tag row */
+  .setting-list-item{padding:.5rem .6rem}
 }
 @media(max-width:380px){
   .chat-quick-btn{font-size:.72rem;padding:.25rem .55rem}
