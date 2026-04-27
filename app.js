@@ -8,6 +8,7 @@
   const STATE_KEY = 'xinliu_state';
   let state = loadStateSync();
   let saveTimer = null;
+  let serverLoaded = false; // 防止服务端数据加载前覆盖 Redis
 
   function defaultState() {
     return {
@@ -72,8 +73,13 @@
       if (res.ok) {
         const data = await res.json();
         if (data && (data.tasks || data.settings)) {
-          state = mergeState(data);
-          localStorage.setItem(STATE_KEY, JSON.stringify(state));
+          // 只有服务端数据比本地更"丰富"时才覆盖
+          const localTaskCount = (state.tasks || []).length;
+          const serverTaskCount = (data.tasks || []).length;
+          if (serverTaskCount >= localTaskCount || localTaskCount === 0) {
+            state = mergeState(data);
+            localStorage.setItem(STATE_KEY, JSON.stringify(state));
+          }
           loadSettingsUI();
           renderDashboard();
           renderBoard();
@@ -85,7 +91,10 @@
     } catch (e) {
       console.warn('[心流] 服务端不可用，使用本地数据:', e.message);
     }
-    // Check server health
+    // 标记服务端加载完成，此后允许写入服务端
+    serverLoaded = true;
+    // 服务端加载完成后，再执行每日维护
+    dailyMaintenance();
     checkServerHealth();
   }
 
@@ -106,6 +115,11 @@
 
   function saveState() {
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
+    // 只有服务端数据加载完成后，才允许写回服务端
+    if (!serverLoaded) {
+      console.log('[心流] 服务端未就绪，仅保存到 localStorage');
+      return;
+    }
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveToServer, 300);
   }
@@ -1462,13 +1476,14 @@ ${taskCtx}`;
   }
 
   // ===== INIT =====
-  loadStateFromServer();
+  // 先用本地数据渲染（避免白屏），然后异步加载服务端数据覆盖
   loadSettingsUI();
   totalCompleted = countCompleted();
-  dailyMaintenance();
   renderDashboard();
   renderBoard();
   renderGantt();
   updateDropsDisplay();
+  // 异步加载服务端数据（加载完成后才允许写入服务端、才执行 dailyMaintenance）
+  loadStateFromServer();
 
 })();

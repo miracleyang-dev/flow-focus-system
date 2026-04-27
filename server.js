@@ -149,7 +149,19 @@ const server = http.createServer(async (req, res) => {
   // --------------------------
   if (url === '/api/data' && method === 'POST') {
     let body = '';
-    req.on('data', chunk => body += chunk);
+    let bodySize = 0;
+    const MAX_BODY = 5 * 1024 * 1024; // 5MB 限制
+
+    req.on('data', chunk => {
+      bodySize += chunk.length;
+      if (bodySize > MAX_BODY) {
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: 0, msg: '数据过大（超过 5MB）' }));
+        req.destroy();
+        return;
+      }
+      body += chunk;
+    });
     req.on('end', async () => {
       let savedToRedis = false;
       let savedToFile = false;
@@ -191,13 +203,20 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --------------------------
-  // 静态文件
+  // 静态文件（防路径遍历）
   // --------------------------
   let filePath = url === '/' ? '/index.html' : url.split('?')[0];
   const ext = path.extname(filePath);
-  filePath = path.join(__dirname, filePath);
+  const resolved = path.resolve(path.join(__dirname, filePath));
 
-  fs.readFile(filePath, (err, content) => {
+  // 确保文件路径不超出项目目录
+  if (!resolved.startsWith(__dirname)) {
+    res.writeHead(403);
+    res.end('403 Forbidden');
+    return;
+  }
+
+  fs.readFile(resolved, (err, content) => {
     if (err) {
       res.writeHead(404);
       res.end('404');
