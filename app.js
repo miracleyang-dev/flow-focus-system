@@ -71,34 +71,61 @@
       const res = await fetch('/api/data');
       if (res.ok) {
         const data = await res.json();
-        if (data && data.tasks) {
+        if (data && (data.tasks || data.settings)) {
           state = mergeState(data);
           localStorage.setItem(STATE_KEY, JSON.stringify(state));
           loadSettingsUI();
           renderDashboard();
           renderBoard();
           renderGantt();
-          updateTimerDisplay();
           updateDropsDisplay();
+          console.log('[心流] 从服务端加载数据成功，任务数:', (state.tasks || []).length);
         }
       }
-    } catch (e) { /* server not available */ }
+    } catch (e) {
+      console.warn('[心流] 服务端不可用，使用本地数据:', e.message);
+    }
+    // Check server health
+    checkServerHealth();
+  }
+
+  async function checkServerHealth() {
+    try {
+      const res = await fetch('/api/health');
+      if (res.ok) {
+        const h = await res.json();
+        if (!h.redis) {
+          console.warn('[心流] Redis 不可用:', h.redisError || '未知原因');
+          console.warn('[心流] 环境变量:', JSON.stringify(h.env));
+        } else {
+          console.log('[心流] Redis 连接正常');
+        }
+      }
+    } catch (e) { /* ignore */ }
   }
 
   function saveState() {
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveToServer, 100);
+    saveTimer = setTimeout(saveToServer, 300);
   }
 
   async function saveToServer() {
     try {
-      await fetch('/api/data', {
+      const res = await fetch('/api/data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(state),
       });
-    } catch (e) { /* ignore */ }
+      if (res.ok) {
+        const result = await res.json();
+        if (!result.ok) {
+          console.error('[心流] 保存失败:', result.msg);
+        }
+      }
+    } catch (e) {
+      console.warn('[心流] 保存到服务端失败:', e.message);
+    }
   }
 
   // ===== TAG HELPERS =====
