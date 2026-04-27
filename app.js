@@ -163,14 +163,30 @@
 
       const serverTaskCount = (data.tasks || []).length;
       const localTaskCount = (state.tasks || []).length;
+      const serverTime = data.lastModified || 0;
+      const localTime = state.lastModified || 0;
 
       // ===== DATA LOSS PROTECTION =====
-      // NEVER accept server data that has significantly fewer tasks
-      // This prevents the scenario where one device clears data and pushes empty state
+      // If server is empty but local has data:
+      // - If server's lastModified is NEWER (explicit clear from another device), accept it
+      // - Otherwise, push local data to server (server lost data somehow)
       if (localTaskCount > 0 && serverTaskCount === 0) {
-        // Server is empty but we have local data — do NOT overwrite, push our data instead
-        console.log('[心流] 服务端数据为空但本地有数据，跳过同步并推送本地数据');
-        saveToServer();
+        if (serverTime > localTime) {
+          // Another device intentionally cleared data — accept the clear
+          console.log('[心流] 另一设备已清除数据，同步清除...');
+          state = mergeState(data);
+          lastSyncHash = computeStateHash();
+          localStorage.setItem(STATE_KEY, JSON.stringify(state));
+          renderDashboard();
+          renderBoard();
+          renderGantt();
+          updateDropsDisplay();
+          loadSettingsUI();
+        } else {
+          // Server lost data, push local data back
+          console.log('[心流] 服务端数据为空但本地有数据，推送本地数据');
+          saveToServer();
+        }
         return;
       }
 
@@ -183,10 +199,6 @@
 
       // No change detected
       if (serverSig === localSig) return;
-
-      // Use lastModified timestamp for proper conflict resolution
-      const serverTime = data.lastModified || 0;
-      const localTime = state.lastModified || 0;
 
       // Only accept server data if it's actually newer
       if (serverTime <= localTime) {
@@ -235,13 +247,6 @@
   }
 
   async function saveToServer() {
-    // DATA LOSS PROTECTION: never push completely empty state to server
-    // if we previously had data (prevents accidental wipe)
-    if ((!state.tasks || state.tasks.length === 0) && (!state.tags || state.tags.length === 0)) {
-      console.warn('[心流] 本地数据为空，跳过推送到服务端（防止数据丢失）');
-      saveTimer = null;
-      return;
-    }
     isSaving = true;
     try {
       const res = await fetch('/api/data', {
@@ -722,7 +727,7 @@
     touchDragId = null;
     touchDragging = false;
 
-    if (document.querySelector('.task-card.drag-over') || true) renderBoard();
+    renderBoard();
   }
 
   function renderBoard() {
@@ -957,9 +962,7 @@
     if (changed) saveState();
     else {
       // Still save the lastDailyCheck marker
-      localStorage.setItem(STATE_KEY, JSON.stringify(state));
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(saveToServer, 300);
+      saveState();
     }
   }
 

@@ -57,7 +57,7 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 /* ===== MOBILE HEADER ===== */
 #mobile-header{
   display:none;position:fixed;top:0;left:0;right:0;height:52px;
-  background:var(--bg-card);border-bottom:1px solid rgba(255,255,255,.06);
+  background:var(--bg-card);border-bottom:1px solid var(--border-subtle);
   padding:0 1rem;align-items:center;gap:.7rem;z-index:90;
 }
 .brand-icon-sm{
