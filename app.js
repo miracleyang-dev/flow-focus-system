@@ -28,6 +28,7 @@
       drops: { total: 0, history: [] },
       savedChats: [],
       lastDailyCheck: '',
+      lastModified: 0,
     };
   }
 
@@ -73,19 +74,39 @@
       if (res.ok) {
         const data = await res.json();
         if (data && (data.tasks || data.settings)) {
-          // 只有服务端数据比本地更"丰富"时才覆盖
           const localTaskCount = (state.tasks || []).length;
           const serverTaskCount = (data.tasks || []).length;
-          if (serverTaskCount >= localTaskCount || localTaskCount === 0) {
+          const serverTime = data.lastModified || 0;
+          const localTime = state.lastModified || 0;
+
+          // Decide whether to use server data:
+          // 1. Server has more/equal tasks OR local is empty → take server
+          // 2. Server has fewer tasks but is newer (lastModified) → take server
+          // 3. Server is empty but local has data → keep local, push to server later
+          let useServer = false;
+          if (localTaskCount === 0) {
+            useServer = true;
+          } else if (serverTaskCount === 0 && localTaskCount > 0) {
+            useServer = false; // Never overwrite local data with empty server
+          } else if (serverTime > localTime) {
+            useServer = true; // Server is newer
+          } else if (serverTaskCount >= localTaskCount) {
+            useServer = true; // Server has more data
+          }
+
+          if (useServer) {
             state = mergeState(data);
             localStorage.setItem(STATE_KEY, JSON.stringify(state));
+            console.log('[心流] 从服务端加载数据成功，任务数:', (state.tasks || []).length);
+          } else {
+            console.log('[心流] 本地数据更丰富或更新，保留本地数据，任务数:', localTaskCount);
           }
+
           loadSettingsUI();
           renderDashboard();
           renderBoard();
           renderGantt();
           updateDropsDisplay();
-          console.log('[心流] 从服务端加载数据成功，任务数:', (state.tasks || []).length);
         }
       }
     } catch (e) {
@@ -118,42 +139,70 @@
   // ===== CROSS-DEVICE SYNC POLLING =====
   let syncPollInterval = null;
   let lastSyncHash = '';
+  let isSaving = false; // Flag to prevent poll during active save
 
   function computeStateHash() {
-    // Simple hash based on task count, last modified timestamps, and tags
-    const taskSig = (state.tasks || []).map(t => t.id + (t.done ? '1' : '0') + (t.sortOrder || 0) + (t.name || '')).join('|');
-    const tagSig = (state.tags || []).map(t => t.id + t.color).join('|');
-    return taskSig + '##' + tagSig;
+    // Comprehensive hash based on all meaningful state fields
+    const taskSig = (state.tasks || []).map(t => t.id + (t.done ? '1' : '0') + (t.sortOrder || 0) + (t.name || '') + (t.date || '') + (t.quadrant || '') + (t.note || '') + (t.tags || []).join(',')).join('|');
+    const tagSig = (state.tags || []).map(t => t.id + t.name + t.color).join('|');
+    const linkSig = (state.links || []).map(l => l.id + l.name + l.url).join('|');
+    return taskSig + '##' + tagSig + '##' + linkSig + '##' + ((state.drops || {}).total || 0);
   }
 
   async function pollServerSync() {
     if (!serverLoaded) return;
-    // Don't poll while a save is pending
-    if (saveTimer) return;
+    // Don't poll while a save is in progress or pending
+    if (saveTimer || isSaving) return;
+    // Don't poll when modal is open (user is editing)
+    if (!modalOverlay.classList.contains('hidden')) return;
     try {
       const res = await fetch('/api/data');
       if (!res.ok) return;
       const data = await res.json();
-      if (!data || !data.tasks) return;
+      if (!data || typeof data !== 'object') return;
+
+      const serverTaskCount = (data.tasks || []).length;
+      const localTaskCount = (state.tasks || []).length;
+
+      // ===== DATA LOSS PROTECTION =====
+      // NEVER accept server data that has significantly fewer tasks
+      // This prevents the scenario where one device clears data and pushes empty state
+      if (localTaskCount > 0 && serverTaskCount === 0) {
+        // Server is empty but we have local data — do NOT overwrite, push our data instead
+        console.log('[心流] 服务端数据为空但本地有数据，跳过同步并推送本地数据');
+        saveToServer();
+        return;
+      }
 
       // Build signatures to detect any change
-      const serverSig = (data.tasks || []).map(t => t.id + (t.done ? '1' : '0') + (t.sortOrder || 0) + (t.name || '')).join('|')
-        + '##' + (data.tags || []).map(t => t.id + t.color).join('|');
+      const serverSig = (data.tasks || []).map(t => t.id + (t.done ? '1' : '0') + (t.sortOrder || 0) + (t.name || '') + (t.date || '') + (t.quadrant || '') + (t.note || '') + (t.tags || []).join(',')).join('|')
+        + '##' + (data.tags || []).map(t => t.id + t.name + t.color).join('|')
+        + '##' + (data.links || []).map(l => l.id + l.name + l.url).join('|')
+        + '##' + ((data.drops || {}).total || 0);
       const localSig = computeStateHash();
 
-      if (serverSig !== localSig && serverSig !== lastSyncHash) {
-        // Server has different data from another device
-        console.log('[心流] 检测到服务端数据变化，同步中...');
-        state = mergeState(data);
-        lastSyncHash = computeStateHash();
-        localStorage.setItem(STATE_KEY, JSON.stringify(state));
-        // Re-render all views
-        renderDashboard();
-        renderBoard();
-        renderGantt();
-        updateDropsDisplay();
-        loadSettingsUI();
+      // No change detected
+      if (serverSig === localSig) return;
+
+      // Use lastModified timestamp for proper conflict resolution
+      const serverTime = data.lastModified || 0;
+      const localTime = state.lastModified || 0;
+
+      // Only accept server data if it's actually newer
+      if (serverTime <= localTime) {
+        return;
       }
+
+      console.log('[心流] 检测到服务端数据更新 (server:', new Date(serverTime).toLocaleTimeString(), ', local:', new Date(localTime).toLocaleTimeString(), ')，同步中...');
+      state = mergeState(data);
+      lastSyncHash = computeStateHash();
+      localStorage.setItem(STATE_KEY, JSON.stringify(state));
+      // Re-render all views
+      renderDashboard();
+      renderBoard();
+      renderGantt();
+      updateDropsDisplay();
+      loadSettingsUI();
     } catch (e) {
       // Silently fail - will retry next interval
     }
@@ -161,8 +210,8 @@
 
   function startSyncPolling() {
     lastSyncHash = computeStateHash();
-    // Poll every 3 seconds for cross-device sync
-    syncPollInterval = setInterval(pollServerSync, 3000);
+    // Poll every 5 seconds for cross-device sync (less aggressive than 3s)
+    syncPollInterval = setInterval(pollServerSync, 5000);
     // Also sync on visibility change (when user switches back to tab/app)
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
@@ -172,8 +221,10 @@
   }
 
   function saveState() {
+    // Stamp the modification time for conflict resolution
+    state.lastModified = Date.now();
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
-    lastSyncHash = computeStateHash(); // Update hash so polling doesn't overwrite our own changes
+    lastSyncHash = computeStateHash();
     // 只有服务端数据加载完成后，才允许写回服务端
     if (!serverLoaded) {
       console.log('[心流] 服务端未就绪，仅保存到 localStorage');
@@ -184,6 +235,14 @@
   }
 
   async function saveToServer() {
+    // DATA LOSS PROTECTION: never push completely empty state to server
+    // if we previously had data (prevents accidental wipe)
+    if ((!state.tasks || state.tasks.length === 0) && (!state.tags || state.tags.length === 0)) {
+      console.warn('[心流] 本地数据为空，跳过推送到服务端（防止数据丢失）');
+      saveTimer = null;
+      return;
+    }
+    isSaving = true;
     try {
       const res = await fetch('/api/data', {
         method: 'POST',
@@ -198,6 +257,9 @@
       }
     } catch (e) {
       console.warn('[心流] 保存到服务端失败:', e.message);
+    } finally {
+      isSaving = false;
+      saveTimer = null;
     }
   }
 
@@ -1414,9 +1476,18 @@ ${taskCtx}`;
   });
 
   document.getElementById('btn-clear-data').addEventListener('click', () => {
-    if (confirm('确定要清除所有数据吗？此操作不可恢复。')) {
+    if (confirm('确定要清除所有数据吗？此操作不可恢复。\n\n注意：这将同时清除所有设备上的数据。')) {
       state = defaultState();
-      saveState();
+      state.lastModified = Date.now();
+      localStorage.setItem(STATE_KEY, JSON.stringify(state));
+      // Force push empty state to server (user explicitly chose to clear)
+      if (serverLoaded) {
+        fetch('/api/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(state),
+        }).catch(() => {});
+      }
       loadSettingsUI();
       alert('数据已清除。');
       switchView('dump');
