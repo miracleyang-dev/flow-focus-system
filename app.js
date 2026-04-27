@@ -1143,32 +1143,56 @@ ${taskCtx}`;
 
   // Data management
   document.getElementById('btn-export').addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'xinliu_backup_' + todayKey() + '.json';
-    a.click();
+    try {
+      const json = JSON.stringify(state, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'xinliu_backup_' + todayKey() + '.json';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      // Cleanup after a short delay (Safari needs time)
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 200);
+    } catch (err) {
+      alert('导出失败：' + err.message);
+    }
   });
 
+  const importFileInput = document.getElementById('import-file');
   document.getElementById('btn-import').addEventListener('click', () => {
-    document.getElementById('import-file').click();
+    // Reset value so re-selecting the same file triggers change
+    importFileInput.value = '';
+    importFileInput.click();
   });
 
-  document.getElementById('import-file').addEventListener('change', (e) => {
+  importFileInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
         const imported = JSON.parse(ev.target.result);
+        if (!imported || typeof imported !== 'object') throw new Error('无效数据');
         state = mergeState(imported);
         saveState();
         loadSettingsUI();
-        alert('导入成功！');
+        renderDashboard();
+        renderBoard();
+        renderGantt();
+        updateDropsDisplay();
+        alert('导入成功！共 ' + (state.tasks ? state.tasks.length : 0) + ' 个任务已恢复。');
         switchView('board');
       } catch (err) {
-        alert('导入失败：无效的 JSON 文件');
+        alert('导入失败：' + (err.message || '无效的 JSON 文件'));
       }
+    };
+    reader.onerror = () => {
+      alert('导入失败：文件读取出错');
     };
     reader.readAsText(file);
   });
