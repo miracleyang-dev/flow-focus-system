@@ -451,6 +451,14 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .drops-current h4{color:var(--cyan) !important}
 .drops-current-num{font-size:2rem;font-weight:700;color:var(--cyan);margin-top:.3rem}
 
+/* Drops History */
+.drops-history-list{margin-top:.6rem;max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:.3rem}
+.drops-history-item{display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;background:var(--bg);border:1px solid var(--border-light);border-radius:var(--radius-sm);font-size:.82rem}
+.drops-history-item .dhi-date{color:var(--text-muted);font-size:.75rem;flex-shrink:0;width:80px}
+.drops-history-item .dhi-amount{color:var(--cyan);font-weight:700;flex-shrink:0;min-width:40px;text-align:right}
+.drops-history-item .dhi-reason{flex:1;color:var(--text-dim);word-break:break-word}
+.drops-history-empty{text-align:center;color:var(--text-muted);padding:1rem;font-size:.85rem}
+
 /* ===== RESPONSIVE ===== */
 @media(max-width:768px){
   #sidebar{transform:translateX(-100%)}

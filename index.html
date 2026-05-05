@@ -133,7 +133,10 @@
       <div id="dash-today-tasks" class="dash-task-list"></div>
     </div>
     <div class="dash-section" id="dash-overdue-section" style="display:none">
-      <h3 style="color:var(--red)">逾期任务</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem">
+        <h3 style="color:var(--red);margin-bottom:0">逾期任务</h3>
+        <button class="btn-secondary" id="btn-migrate-overdue" style="font-size:.78rem;padding:.3rem .7rem">一键迁移至今日</button>
+      </div>
       <div id="dash-overdue-tasks" class="dash-task-list"></div>
     </div>
   </section>
@@ -322,6 +325,22 @@
         <button id="btn-export" class="btn-secondary">导出数据 (JSON)</button>
         <button id="btn-import" class="btn-secondary">导入数据</button>
         <input type="file" id="import-file" accept=".json" style="display:none">
+        <!-- Import Mode Modal -->
+        <div id="import-mode-overlay" class="modal-overlay hidden">
+          <div class="modal" style="max-width:400px">
+            <div class="modal-header">
+              <h2>选择导入模式</h2>
+              <button class="modal-close" id="import-mode-close">&times;</button>
+            </div>
+            <div class="modal-body">
+              <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem">请选择数据导入方式：</p>
+              <div style="display:flex;flex-direction:column;gap:.6rem">
+                <button id="import-mode-overwrite" class="btn-danger" style="width:100%;text-align:center;justify-content:center">覆盖模式 — 替换当前所有数据</button>
+                <button id="import-mode-merge" class="btn-secondary" style="width:100%;text-align:center;justify-content:center">合并模式 — 与现有数据叠加合并</button>
+              </div>
+            </div>
+          </div>
+        </div>
         <button id="btn-clear-data" class="btn-danger">清除所有数据</button>
       </div>
     </div>
@@ -437,6 +456,13 @@
       <div class="drops-rule-section drops-current">
         <h4>当前水滴</h4>
         <div class="drops-current-num" id="drops-rules-total">0</div>
+      </div>
+      <div class="drops-rule-section">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <h4>水滴历史明细</h4>
+          <button class="btn-secondary" id="btn-toggle-drops-history" style="font-size:.75rem;padding:.25rem .6rem">展开记录</button>
+        </div>
+        <div id="drops-history-list" class="drops-history-list" style="display:none"></div>
       </div>
     </div>
   </div>

@@ -481,6 +481,32 @@
     if (e.target === dropsRulesOverlay) dropsRulesOverlay.classList.add('hidden');
   });
 
+  // Drops history toggle
+  const dropsHistoryList = document.getElementById('drops-history-list');
+  const btnToggleDropsHistory = document.getElementById('btn-toggle-drops-history');
+  btnToggleDropsHistory.addEventListener('click', () => {
+    const isHidden = dropsHistoryList.style.display === 'none';
+    dropsHistoryList.style.display = isHidden ? '' : 'none';
+    btnToggleDropsHistory.textContent = isHidden ? '收起记录' : '展开记录';
+    if (isHidden) renderDropsHistory();
+  });
+
+  function renderDropsHistory() {
+    const history = (state.drops && state.drops.history) || [];
+    dropsHistoryList.innerHTML = '';
+    if (history.length === 0) {
+      dropsHistoryList.innerHTML = '<div class="drops-history-empty">暂无水滴记录，完成任务即可获得水滴。</div>';
+      return;
+    }
+    // Show newest first
+    [...history].reverse().forEach(h => {
+      const el = document.createElement('div');
+      el.className = 'drops-history-item';
+      el.innerHTML = `<span class="dhi-date">${h.date || '-'}</span><span class="dhi-amount">+${h.amount}</span><span class="dhi-reason">${esc(h.reason || '')}</span>`;
+      dropsHistoryList.appendChild(el);
+    });
+  }
+
   function showWaterCelebration(total) {
     const overlay = document.getElementById('celebrate-overlay');
     const msgEl = document.getElementById('celebrate-msg');
@@ -849,18 +875,12 @@
       const weight = PRIORITY_WEIGHTS[t.quadrant] || 1;
       const dropAmount = Math.floor((t.duration || 30) / 60 * weight);
       awardDrops(dropAmount, '完成任务: ' + t.name);
-      // Milestone celebration
-      const completed = countCompleted();
-      const milestone = MILESTONES.find(m => m === completed);
-      if (milestone) {
-        showCelebration(MILESTONE_MSGS[milestone]);
-      } else {
-        const card = document.querySelector(`.task-card[data-id="${id}"]`);
-        if (card) {
-          card.style.transition = 'transform .3s, opacity .3s';
-          card.style.transform = 'scale(1.03)';
-          setTimeout(() => { card.style.transform = ''; }, 300);
-        }
+      // Simple card animation on completion
+      const card = document.querySelector(`.task-card[data-id="${id}"]`);
+      if (card) {
+        card.style.transition = 'transform .3s, opacity .3s';
+        card.style.transform = 'scale(1.03)';
+        setTimeout(() => { card.style.transform = ''; }, 300);
       }
     }
   }
@@ -976,22 +996,14 @@
   });
 
   // ===== DAILY MAINTENANCE =====
-  // Runs once per day on load: removes completed tasks from previous days, moves recurring tasks to today
+  // Runs once per day on load: first handles recurring tasks, then removes completed non-recurring tasks from previous days
   function dailyMaintenance() {
     const today = todayKey();
     if (state.lastDailyCheck === today) return; // already ran today
 
     let changed = false;
 
-    // 1. Remove completed tasks from previous days
-    const beforeCount = state.tasks.length;
-    state.tasks = state.tasks.filter(t => {
-      if (t.done && t.date && t.date < today) return false; // remove old completed
-      return true;
-    });
-    if (state.tasks.length !== beforeCount) changed = true;
-
-    // 2. Move recurring tasks to today if their date is in the past
+    // 1. First: identify and advance recurring tasks to today (before any deletion)
     state.tasks.forEach(t => {
       if (t.recurrence && t.recurrence !== 'none' && t.date && t.date < today) {
         t.date = today;
@@ -1000,12 +1012,17 @@
       }
     });
 
+    // 2. Then: remove completed NON-recurring tasks from previous days
+    // Recurring tasks are never auto-deleted — they persist and keep generating
+    const beforeCount = state.tasks.length;
+    state.tasks = state.tasks.filter(t => {
+      if (t.done && t.date && t.date < today && (!t.recurrence || t.recurrence === 'none')) return false;
+      return true;
+    });
+    if (state.tasks.length !== beforeCount) changed = true;
+
     state.lastDailyCheck = today;
-    if (changed) saveState();
-    else {
-      // Still save the lastDailyCheck marker
-      saveState();
-    }
+    saveState();
   }
 
   // ===== GANTT VIEW =====
@@ -1120,14 +1137,16 @@
 1. **情绪支持**：当用户说"不想干活"、"好累"、"焦虑"时，先共情，再温和地帮他找到一个最小的启动步骤
 2. **任务分析**：你可以看到用户的所有任务数据，帮他分析优先级、发现问题
 3. **行动规划**：帮用户制定当下可执行的具体计划
-4. **拖延克服**：用2分钟法则、番茄工作法等技巧帮用户启动
+4. **拖延克服**：用2分钟法则等技巧帮用户启动
 5. **适时鼓励**：看到已完成的任务或专注记录时，给予具体的肯定
+6. **人文关怀**：关注用户的身心状态，适时提醒休息、喝水、活动身体；当感受到用户压力大或情绪低落时，给予温暖的陪伴和理解，不急于给出建议；偶尔分享一些生活智慧或温暖的话语，让用户感受到被关心
 
 说话风格：
 - 像一个理解你的好朋友，不说教
 - 简短有力，不啰嗦（每次回复控制在 150 字以内）
 - 可以偶尔用一些轻松的语气
-- 如果用户明确在发泄情绪，先倾听
+- 如果用户明确在发泄情绪，先倾听，不急于给方案
+- 适时表达关心，比如提醒注意身体、注意休息
 
 以下是用户当前的任务数据：
 ${taskCtx}`;
@@ -1490,8 +1509,10 @@ ${taskCtx}`;
   });
 
   const importFileInput = document.getElementById('import-file');
+  const importModeOverlay = document.getElementById('import-mode-overlay');
+  let pendingImportData = null;
+
   document.getElementById('btn-import').addEventListener('click', () => {
-    // Reset value so re-selecting the same file triggers change
     importFileInput.value = '';
     importFileInput.click();
   });
@@ -1504,23 +1525,95 @@ ${taskCtx}`;
       try {
         const imported = JSON.parse(ev.target.result);
         if (!imported || typeof imported !== 'object') throw new Error('无效数据');
-        state = mergeState(imported);
-        saveState();
-        loadSettingsUI();
-        renderDashboard();
-        renderBoard();
-        renderGantt();
-        updateDropsDisplay();
-        alert('导入成功！共 ' + (state.tasks ? state.tasks.length : 0) + ' 个任务已恢复。');
-        switchView('board');
+        pendingImportData = imported;
+        importModeOverlay.classList.remove('hidden');
       } catch (err) {
         alert('导入失败：' + (err.message || '无效的 JSON 文件'));
       }
     };
-    reader.onerror = () => {
-      alert('导入失败：文件读取出错');
-    };
+    reader.onerror = () => { alert('导入失败：文件读取出错'); };
     reader.readAsText(file);
+  });
+
+  document.getElementById('import-mode-close').addEventListener('click', () => {
+    importModeOverlay.classList.add('hidden');
+    pendingImportData = null;
+  });
+  importModeOverlay.addEventListener('click', (e) => {
+    if (e.target === importModeOverlay) { importModeOverlay.classList.add('hidden'); pendingImportData = null; }
+  });
+
+  // Overwrite mode: replace all data
+  document.getElementById('import-mode-overwrite').addEventListener('click', () => {
+    if (!pendingImportData) return;
+    importModeOverlay.classList.add('hidden');
+    state = mergeState(pendingImportData);
+    pendingImportData = null;
+    saveState();
+    loadSettingsUI();
+    renderDashboard();
+    renderBoard();
+    renderGantt();
+    updateDropsDisplay();
+    alert('覆盖导入成功！共 ' + (state.tasks ? state.tasks.length : 0) + ' 个任务。');
+    switchView('board');
+  });
+
+  // Merge mode: combine with existing data
+  document.getElementById('import-mode-merge').addEventListener('click', () => {
+    if (!pendingImportData) return;
+    importModeOverlay.classList.add('hidden');
+    const imported = mergeState(pendingImportData);
+    pendingImportData = null;
+    // Merge tasks: add imported tasks that don't exist locally (by id)
+    const existingIds = new Set((state.tasks || []).map(t => t.id));
+    (imported.tasks || []).forEach(t => {
+      if (!existingIds.has(t.id)) { state.tasks.push(t); }
+    });
+    // Merge tags: add imported tags that don't exist locally (by id)
+    const existingTagIds = new Set((state.tags || []).map(t => t.id));
+    (imported.tags || []).forEach(t => {
+      if (!existingTagIds.has(t.id)) { state.tags.push(t); }
+    });
+    // Merge links: add imported links that don't exist locally (by id)
+    const existingLinkIds = new Set((state.links || []).map(l => l.id));
+    (imported.links || []).forEach(l => {
+      if (!existingLinkIds.has(l.id)) { state.links.push(l); }
+    });
+    // Merge quotes: add new ones
+    const existingQuotes = new Set(state.quotes || []);
+    (imported.quotes || []).forEach(q => {
+      if (!existingQuotes.has(q)) { state.quotes.push(q); }
+    });
+    // Merge savedChats: add new ones by id
+    const existingChatIds = new Set((state.savedChats || []).map(c => c.id));
+    (imported.savedChats || []).forEach(c => {
+      if (!existingChatIds.has(c.id)) { state.savedChats.push(c); }
+    });
+    // Merge drops: take the higher total and combine history
+    if (imported.drops) {
+      if (!state.drops) state.drops = { total: 0, history: [] };
+      state.drops.total = Math.max(state.drops.total, imported.drops.total || 0);
+      const existingHistoryKeys = new Set((state.drops.history || []).map(h => h.date + h.reason + h.amount));
+      (imported.drops.history || []).forEach(h => {
+        const key = h.date + h.reason + h.amount;
+        if (!existingHistoryKeys.has(key)) { state.drops.history.push(h); }
+      });
+    }
+    // Merge focusLog
+    const existingLogKeys = new Set((state.focusLog || []).map(l => JSON.stringify(l)));
+    (imported.focusLog || []).forEach(l => {
+      const key = JSON.stringify(l);
+      if (!existingLogKeys.has(key)) { state.focusLog.push(l); }
+    });
+    saveState();
+    loadSettingsUI();
+    renderDashboard();
+    renderBoard();
+    renderGantt();
+    updateDropsDisplay();
+    alert('合并导入成功！当前共 ' + (state.tasks ? state.tasks.length : 0) + ' 个任务。');
+    switchView('board');
   });
 
   document.getElementById('btn-clear-data').addEventListener('click', () => {
@@ -1565,11 +1658,12 @@ ${taskCtx}`;
     '专注是最好的时间管理。',
     '你不需要看到整条路，只需迈出下一步。',
     '休息不是偷懒，是为了走更远的路。',
-    '每一个番茄钟，都是你认真生活的证据。',
     '别想太多，先做5分钟再说。',
     '今天完成的每一件小事，都在为未来的你铺路。',
     '心流状态：忘记时间，沉浸其中。',
     '不要等到准备好才开始，开始了才会准备好。',
+    '照顾好自己，才能更好地面对一切。',
+    '累了就歇一歇，世界不会因此停转。',
   ];
 
   function getQuotes() {
@@ -1662,6 +1756,18 @@ ${taskCtx}`;
   // ===== DASHBOARD QUICK ACTIONS =====
   document.getElementById('qa-ai-chat').addEventListener('click', () => switchView('chat'));
 
+  // Migrate all overdue tasks to today
+  document.getElementById('btn-migrate-overdue').addEventListener('click', () => {
+    const today = todayKey();
+    const overdue = state.tasks.filter(t => !t.done && t.date && t.date < today);
+    if (overdue.length === 0) return;
+    overdue.forEach(t => { t.date = today; });
+    saveState();
+    renderDashboard();
+    renderBoard();
+    alert('已将 ' + overdue.length + ' 个逾期任务迁移至今日。');
+  });
+
   const qaInline = document.getElementById('dash-quick-add-inline');
   const qaTaskInput = document.getElementById('qa-task-input');
 
@@ -1687,17 +1793,8 @@ ${taskCtx}`;
   });
 
   // ===== CELEBRATION EFFECT =====
-  let totalCompleted = 0;
-  const MILESTONES = [3, 5, 10, 20, 50];
-  const MILESTONE_MSGS = {
-    3: '完成3个任务了，不错的开始！',
-    5: '5个任务搞定，节奏很好！',
-    10: '10个任务！你今天效率爆表！',
-    20: '20个任务，你是效率机器！',
-    50: '50个任务！传奇级别的一天！',
-  };
-
-  function countCompleted() { return state.tasks.filter(t => t.done).length; }
+  // Only 100-drop milestones trigger celebration (handled in awardDrops / showWaterCelebration)
+  // No per-task-count milestone celebrations
 
   function showCelebration(msg) {
     const overlay = document.getElementById('celebrate-overlay');
@@ -1776,7 +1873,6 @@ ${taskCtx}`;
 
   // 先用本地数据渲染（避免白屏），然后异步加载服务端数据覆盖
   loadSettingsUI();
-  totalCompleted = countCompleted();
   renderDashboard();
   renderBoard();
   renderGantt();
