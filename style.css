@@ -106,6 +106,7 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 #dump-input:focus{outline:none;border-color:var(--accent)}
 #dump-input::placeholder{color:var(--text-muted)}
 .dump-actions{display:flex;gap:.8rem;margin-top:1rem;flex-wrap:wrap}
+.dump-input-hint{border-color:var(--accent) !important;box-shadow:0 0 0 2px rgba(99,102,241,.25);animation:dump-hint-pulse .4s ease}
 .ai-loading{display:flex;align-items:center;gap:.8rem;margin-top:1rem;color:var(--accent)}
 .ai-loading.hidden{display:none}
 .loading-spinner{
@@ -113,6 +114,7 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
   border-radius:50%;animation:spin .8s linear infinite;
 }
 @keyframes spin{to{transform:rotate(360deg)}}
+@keyframes dump-hint-pulse{0%{transform:scale(1)}50%{transform:scale(1.005)}100%{transform:scale(1)}}
 
 /* ===== BOARD VIEW ===== */
 .board-filters{display:flex;gap:.5rem;margin-top:.8rem;flex-wrap:wrap}
@@ -354,24 +356,6 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .dash-stat-accent .dash-stat-num{color:var(--accent)}
 .dash-stat-drops .dash-stat-num{color:var(--cyan);font-size:1.4rem}
 
-/* Quick Actions */
-.dash-quick-actions{display:flex;gap:.6rem;margin-bottom:1.5rem;flex-wrap:wrap}
-.dash-qa-btn{
-  display:inline-flex;align-items:center;gap:.4rem;
-  background:var(--bg-card);border:1px solid var(--border-light);
-  color:var(--text-dim);padding:.5rem 1rem;border-radius:var(--radius-sm);
-  cursor:pointer;font-size:.85rem;font-weight:500;transition:all .15s;
-}
-.dash-qa-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
-.dash-qa-btn svg{width:16px;height:16px}
-
-.dash-quick-add-inline{display:flex;gap:.4rem;margin-bottom:1.2rem;align-items:center}
-.dash-quick-add-inline.hidden{display:none}
-.dash-quick-add-inline input{
-  flex:1;background:var(--bg-input);color:var(--text);border:1px solid rgba(255,255,255,.1);
-  padding:.5rem .8rem;border-radius:var(--radius-sm);font-size:.9rem;
-}
-.dash-quick-add-inline input:focus{outline:none;border-color:var(--accent)}
 
 /* Quick Links - strip layout */
 .dash-links{display:flex;flex-direction:column;gap:.4rem}

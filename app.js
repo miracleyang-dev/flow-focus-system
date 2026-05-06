@@ -584,8 +584,16 @@
 
   btnAddManual.addEventListener('click', () => {
     const text = dumpInput.value.trim();
-    if (!text) return;
+    if (!text) {
+      openAddModal();
+      return;
+    }
     const lines = text.split(/\n/).map(l => l.replace(/^[-*·•\d.、]+\s*/, '').trim()).filter(Boolean);
+    if (lines.length === 0) {
+      dumpInput.value = '';
+      openAddModal();
+      return;
+    }
     lines.forEach(name => addTask({ name }));
     dumpInput.value = '';
     switchView('board');
@@ -952,6 +960,8 @@
     const t = state.tasks.find(x => x.id === id);
     if (!t) return;
     editingTaskId = id;
+    document.getElementById('modal-title').textContent = '编辑任务';
+    btnModalDelete.style.display = '';
     editName.value = t.name;
     selectedTags = [...(t.tags || [])];
     renderEditTags();
@@ -966,22 +976,54 @@
     modalOverlay.classList.remove('hidden');
   }
 
+  function openAddModal() {
+    editingTaskId = null;
+    document.getElementById('modal-title').textContent = '添加任务';
+    btnModalDelete.style.display = 'none';
+    editName.value = '';
+    selectedTags = [];
+    renderEditTags();
+    editQuadrant.value = 'important';
+    editRecurrence.value = 'none';
+    editDate.value = todayKey();
+    editTime.value = '';
+    editDuration.value = 30;
+    editNote.value = '';
+    currentSubtasks = [];
+    renderSubtasks();
+    modalOverlay.classList.remove('hidden');
+    editName.focus();
+  }
+
   modalClose.addEventListener('click', () => modalOverlay.classList.add('hidden'));
   modalOverlay.addEventListener('click', (e) => { if (e.target === modalOverlay) modalOverlay.classList.add('hidden'); });
 
   btnModalSave.addEventListener('click', () => {
-    if (!editingTaskId) return;
-    updateTask(editingTaskId, {
-      name: editName.value.trim() || '未命名任务',
-      tags: [...selectedTags],
-      quadrant: editQuadrant.value,
-      recurrence: editRecurrence.value,
-      date: editDate.value || todayKey(),
-      time: editTime.value || '',
-      duration: parseInt(editDuration.value) || 30,
-      note: editNote.value.trim(),
-      subtasks: currentSubtasks
-    });
+    if (editingTaskId) {
+      updateTask(editingTaskId, {
+        name: editName.value.trim() || '未命名任务',
+        tags: [...selectedTags],
+        quadrant: editQuadrant.value,
+        recurrence: editRecurrence.value,
+        date: editDate.value || todayKey(),
+        time: editTime.value || '',
+        duration: parseInt(editDuration.value) || 30,
+        note: editNote.value.trim(),
+        subtasks: currentSubtasks
+      });
+    } else {
+      addTask({
+        name: editName.value.trim() || '未命名任务',
+        tags: [...selectedTags],
+        quadrant: editQuadrant.value,
+        recurrence: editRecurrence.value,
+        date: editDate.value || todayKey(),
+        time: editTime.value || '',
+        duration: parseInt(editDuration.value) || 30,
+        note: editNote.value.trim(),
+        subtasks: currentSubtasks
+      });
+    }
     modalOverlay.classList.add('hidden');
     renderBoard();
   });
@@ -1754,8 +1796,6 @@ ${taskCtx}`;
   }
 
   // ===== DASHBOARD QUICK ACTIONS =====
-  document.getElementById('qa-ai-chat').addEventListener('click', () => switchView('chat'));
-
   // Migrate all overdue tasks to today
   document.getElementById('btn-migrate-overdue').addEventListener('click', () => {
     const today = todayKey();
@@ -1766,30 +1806,6 @@ ${taskCtx}`;
     renderDashboard();
     renderBoard();
     alert('已将 ' + overdue.length + ' 个逾期任务迁移至今日。');
-  });
-
-  const qaInline = document.getElementById('dash-quick-add-inline');
-  const qaTaskInput = document.getElementById('qa-task-input');
-
-  document.getElementById('qa-quick-add').addEventListener('click', () => {
-    qaInline.classList.remove('hidden');
-    qaTaskInput.focus();
-  });
-  document.getElementById('qa-task-cancel').addEventListener('click', () => {
-    qaInline.classList.add('hidden');
-    qaTaskInput.value = '';
-  });
-  function qaSubmitTask() {
-    const name = qaTaskInput.value.trim();
-    if (!name) return;
-    addTask({ name });
-    qaTaskInput.value = '';
-    qaInline.classList.add('hidden');
-    renderDashboard();
-  }
-  document.getElementById('qa-task-submit').addEventListener('click', qaSubmitTask);
-  qaTaskInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); qaSubmitTask(); }
   });
 
   // ===== CELEBRATION EFFECT =====
