@@ -106,7 +106,6 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 #dump-input:focus{outline:none;border-color:var(--accent)}
 #dump-input::placeholder{color:var(--text-muted)}
 .dump-actions{display:flex;gap:.8rem;margin-top:1rem;flex-wrap:wrap}
-.dump-input-hint{border-color:var(--accent) !important;box-shadow:0 0 0 2px rgba(99,102,241,.25);animation:dump-hint-pulse .4s ease}
 .ai-loading{display:flex;align-items:center;gap:.8rem;margin-top:1rem;color:var(--accent)}
 .ai-loading.hidden{display:none}
 .loading-spinner{
@@ -114,7 +113,6 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
   border-radius:50%;animation:spin .8s linear infinite;
 }
 @keyframes spin{to{transform:rotate(360deg)}}
-@keyframes dump-hint-pulse{0%{transform:scale(1)}50%{transform:scale(1.005)}100%{transform:scale(1)}}
 
 /* ===== BOARD VIEW ===== */
 .board-filters{display:flex;gap:.5rem;margin-top:.8rem;flex-wrap:wrap}
@@ -598,8 +596,6 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
   .dash-stats-grid{grid-template-columns:repeat(2,1fr)}
   .dash-stat-num{font-size:1.4rem}
   .dash-stat-label{font-size:.68rem}
-  .focus-timer{width:180px;height:180px}
-  .timer-display{font-size:2.2rem}
   .chat-container{height:calc(100vh - 160px);height:calc(100dvh - 160px)}
   .task-card{padding:.8rem 1rem}
   .task-card-name{font-size:.92rem}

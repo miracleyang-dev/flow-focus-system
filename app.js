@@ -19,7 +19,6 @@
     return {
       tasks: [],
       schedule: {},
-      focusLog: [],
       settings: {
         provider: 'deepseek',
         baseUrl: '',
@@ -147,7 +146,6 @@
 
   // ===== CROSS-DEVICE SYNC POLLING =====
   let syncPollInterval = null;
-  let lastSyncHash = '';
   let isSaving = false; // Flag to prevent poll during active save
 
   function computeStateHash() {
@@ -208,7 +206,6 @@
           // Another device intentionally cleared data — accept the clear
           console.log('[心流] 另一设备已清除数据，同步清除...');
           state = mergeState(data);
-          lastSyncHash = computeStateHash();
           localStorage.setItem(STATE_KEY, JSON.stringify(state));
           renderActiveView();
           updateDropsDisplay();
@@ -256,7 +253,6 @@
 
       console.log('[心流] 检测到服务端数据更新 (server:', new Date(serverTime).toLocaleTimeString(), ', local:', new Date(localTime).toLocaleTimeString(), ')，同步中...');
       state = mergeState(data);
-      lastSyncHash = computeStateHash();
       localStorage.setItem(STATE_KEY, JSON.stringify(state));
       // Smart re-render: only update the currently active view to avoid mobile lag
       renderActiveView();
@@ -267,7 +263,6 @@
   }
 
   function startSyncPolling() {
-    lastSyncHash = computeStateHash();
     // Poll every 5 seconds for cross-device sync (less aggressive than 3s)
     syncPollInterval = setInterval(pollServerSync, 5000);
     // Also sync on visibility change (when user switches back to tab/app)
@@ -282,7 +277,6 @@
     // Stamp the modification time for conflict resolution
     state.lastModified = Date.now();
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
-    lastSyncHash = computeStateHash();
     // 只有服务端数据加载完成后，才允许写回服务端
     if (!serverLoaded) {
       console.log('[心流] 服务端未就绪，仅保存到 localStorage');
@@ -1845,12 +1839,6 @@ ${taskCtx}`;
         if (!existingHistoryKeys.has(key)) { state.drops.history.push(h); }
       });
     }
-    // Merge focusLog
-    const existingLogKeys = new Set((state.focusLog || []).map(l => JSON.stringify(l)));
-    (imported.focusLog || []).forEach(l => {
-      const key = JSON.stringify(l);
-      if (!existingLogKeys.has(key)) { state.focusLog.push(l); }
-    });
     saveState();
     loadSettingsUI();
     renderDashboard();
@@ -2014,17 +2002,6 @@ ${taskCtx}`;
   // ===== CELEBRATION EFFECT =====
   // Only 100-drop milestones trigger celebration (handled in awardDrops / showWaterCelebration)
   // No per-task-count milestone celebrations
-
-  function showCelebration(msg) {
-    const overlay = document.getElementById('celebrate-overlay');
-    const msgEl = document.getElementById('celebrate-msg');
-    const canvas = document.getElementById('confetti-canvas');
-    msgEl.textContent = msg;
-    msgEl.className = 'celebrate-msg';
-    overlay.classList.remove('hidden');
-    fireConfetti(canvas, false);
-    setTimeout(() => overlay.classList.add('hidden'), 2200);
-  }
 
   function fireConfetti(canvas, waterTheme) {
     const ctx = canvas.getContext('2d');
