@@ -45,6 +45,14 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       <span>AI 陪伴</span>
     </li>
+    <li class="nav-item" data-view="habits">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4m-7-7H1m22 0h-4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/><circle cx="12" cy="12" r="4"/></svg>
+      <span>长期习惯</span>
+    </li>
+    <li class="nav-item" data-view="shop">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+      <span>消费商城</span>
+    </li>
   </ul>
   <div class="nav-bottom">
     <li class="nav-item" id="theme-toggle-btn">
@@ -227,6 +235,111 @@
     </div>
   </section>
 
+  <!-- VIEW: HABITS (长期习惯) -->
+  <section id="view-habits" class="view">
+    <div class="view-header">
+      <h1>长期习惯</h1>
+      <p class="view-desc">可反复完成的长期循环任务，记录每次时长或次数，持续积累水滴。</p>
+    </div>
+    <div class="habits-actions">
+      <button id="btn-add-habit" class="btn-primary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        添加习惯
+      </button>
+    </div>
+    <div class="habits-list" id="habits-list">
+      <!-- Rendered by JS -->
+    </div>
+    <div class="habits-log-section" id="habits-log-section" style="display:none">
+      <h3>完成记录</h3>
+      <div id="habits-log" class="habits-log"></div>
+    </div>
+  </section>
+
+  <!-- HABIT ADD/EDIT MODAL -->
+  <div id="habit-modal-overlay" class="modal-overlay hidden">
+    <div class="modal" style="max-width:400px">
+      <div class="modal-header">
+        <h2 id="habit-modal-title">添加习惯</h2>
+        <button class="modal-close" id="habit-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <label>习惯名称</label>
+          <input type="text" id="habit-edit-name" placeholder="如：阅读、运动、冥想">
+        </div>
+        <div class="form-row">
+          <label>记录方式</label>
+          <select id="habit-edit-type">
+            <option value="duration">记录时长 (分钟)</option>
+            <option value="count">记录次数</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>图标 (emoji)</label>
+          <input type="text" id="habit-edit-icon" placeholder="📖" maxlength="4" style="width:60px;text-align:center">
+        </div>
+        <div class="form-row">
+          <label>每次获得水滴数</label>
+          <input type="number" id="habit-edit-drops" min="1" value="2" placeholder="如完成一次/一小时获得多少水滴">
+        </div>
+        <div class="form-row">
+          <label>水滴说明</label>
+          <p style="font-size:.78rem;color:var(--text-muted);margin-top:.2rem">时长类：每完成设定分钟数获得对应水滴<br>次数类：每完成1次获得对应水滴</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-habit-delete" class="btn-danger" style="display:none">删除</button>
+        <button id="btn-habit-save" class="btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- HABIT LOG MODAL (record completion) -->
+  <div id="habit-log-overlay" class="modal-overlay hidden">
+    <div class="modal" style="max-width:360px">
+      <div class="modal-header">
+        <h2 id="habit-log-title">记录完成</h2>
+        <button class="modal-close" id="habit-log-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <label id="habit-log-label">完成时长 (分钟)</label>
+          <input type="number" id="habit-log-value" min="1" value="30">
+        </div>
+        <p id="habit-log-drops-preview" style="font-size:.85rem;color:var(--cyan);margin-top:.5rem"></p>
+      </div>
+      <div class="modal-footer" style="justify-content:flex-end">
+        <button id="btn-habit-log-save" class="btn-primary">确认完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIEW: SHOP -->
+  <section id="view-shop" class="view">
+    <div class="view-header">
+      <h1>消费商城</h1>
+      <p class="view-desc">用专注水滴兑换奖励，犒劳努力的自己。</p>
+      <div class="shop-balance">💧 当前水滴：<strong id="shop-drops-num">0</strong></div>
+    </div>
+    <div class="shop-grid" id="shop-grid">
+      <!-- Rendered by JS -->
+    </div>
+    <div class="shop-custom-section">
+      <h3>自定义商品</h3>
+      <div class="shop-custom-form">
+        <input type="text" id="shop-new-name" placeholder="商品名称">
+        <input type="number" id="shop-new-price" placeholder="价格(水滴)" min="1">
+        <input type="text" id="shop-new-icon" placeholder="图标(emoji)" maxlength="4" style="width:60px;text-align:center">
+        <button id="btn-shop-add" class="btn-secondary">添加商品</button>
+      </div>
+    </div>
+    <div class="shop-section">
+      <h3>购买记录</h3>
+      <div id="shop-history" class="shop-history"></div>
+    </div>
+  </section>
+
   <!-- VIEW: SETTINGS -->
   <section id="view-settings" class="view">
     <div class="view-header">
@@ -349,7 +462,7 @@
       <div class="form-row">
         <label>优先级</label>
         <select id="edit-task-quadrant">
-          <option value="urgent-important">紧急重要</option>
+          <option value="urgent-important">重要紧急</option>
           <option value="important">重要</option>
           <option value="urgent">紧急</option>
           <option value="neither">一般</option>
@@ -424,12 +537,12 @@
         <h4>完成任务获得水滴</h4>
         <p>公式：<code>floor(预估时间 / 60 × 优先级权重)</code></p>
         <div class="drops-weight-table">
-          <div class="drops-weight-row"><span class="dw-label" style="color:var(--q1)">紧急重要</span><span class="dw-val">×4</span></div>
+          <div class="drops-weight-row"><span class="dw-label" style="color:var(--q1)">重要紧急</span><span class="dw-val">×4</span></div>
           <div class="drops-weight-row"><span class="dw-label" style="color:var(--q2)">重要</span><span class="dw-val">×3</span></div>
           <div class="drops-weight-row"><span class="dw-label" style="color:var(--q3)">紧急</span><span class="dw-val">×2</span></div>
           <div class="drops-weight-row"><span class="dw-label" style="color:var(--q4)">一般</span><span class="dw-val">×1</span></div>
         </div>
-        <p class="drops-example">例：完成一个 30 分钟的「紧急重要」任务 = floor(30/60 × 4) = <strong>2 滴</strong></p>
+        <p class="drops-example">例：完成一个 30 分钟的「重要紧急」任务 = floor(30/60 × 4) = <strong>2 滴</strong></p>
       </div>
       <div class="drops-rule-section">
         <h4>里程碑庆祝</h4>

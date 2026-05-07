@@ -48,6 +48,8 @@
     if (!merged.drops) merged.drops = def.drops;
     if (!Array.isArray(merged.savedChats)) merged.savedChats = def.savedChats;
     if (!merged.lastDailyCheck) merged.lastDailyCheck = '';
+    if (!Array.isArray(merged.shopItems)) merged.shopItems = null; // will be initialized with defaults on first access
+    if (!Array.isArray(merged.shopHistory)) merged.shopHistory = [];
     // Migrate tasks: category -> tags
     migrateTasks(merged);
     return merged;
@@ -175,6 +177,8 @@
     if (v === 'dashboard') renderDashboard();
     else if (v === 'board') renderBoard();
     else if (v === 'gantt') renderGantt();
+    else if (v === 'habits') renderHabits();
+    else if (v === 'shop') renderShop();
     else if (v === 'settings') { loadSettingsUI(); renderSettingsLists(); }
   }
 
@@ -331,7 +335,7 @@
   const menuToggle = document.getElementById('menu-toggle');
   const mobileTitle = document.getElementById('mobile-title');
 
-  const viewTitles = { dashboard: '仪表盘', dump: '倒空大脑', board: '任务看板', gantt: '甘特图', chat: 'AI 陪伴', settings: '设置' };
+  const viewTitles = { dashboard: '仪表盘', dump: '倒空大脑', board: '任务看板', gantt: '甘特图', chat: 'AI 陪伴', habits: '长期习惯', shop: '消费商城', settings: '设置' };
 
   function switchView(name) {
     navItems.forEach(n => n.classList.toggle('active', n.dataset.view === name));
@@ -341,12 +345,131 @@
     if (name === 'dashboard') renderDashboard();
     if (name === 'board') renderBoard();
     if (name === 'gantt') renderGantt();
+    if (name === 'habits') renderHabits();
+    if (name === 'shop') renderShop();
     if (name === 'settings') renderSettingsLists();
   }
 
   navItems.forEach(n => n.addEventListener('click', () => switchView(n.dataset.view)));
   menuToggle.addEventListener('click', () => { sidebar.classList.add('open'); overlay.classList.add('active'); });
   function closeSidebar() { sidebar.classList.remove('open'); overlay.classList.remove('active'); }
+
+  // ===== SIDEBAR NAV DRAG REORDER =====
+  const navList = document.querySelector('.nav-list');
+  let navDragSrc = null;
+
+  function initNavDrag() {
+    // Restore saved order
+    const savedOrder = localStorage.getItem('xinliu_nav_order');
+    if (savedOrder) {
+      try {
+        const order = JSON.parse(savedOrder);
+        const items = Array.from(navList.querySelectorAll('.nav-item[data-view]'));
+        const itemMap = {};
+        items.forEach(el => { itemMap[el.dataset.view] = el; });
+        order.forEach(viewName => {
+          const el = itemMap[viewName];
+          if (el) navList.appendChild(el);
+        });
+      } catch(e) { /* ignore */ }
+    }
+    // Make nav items draggable
+    navList.querySelectorAll('.nav-item[data-view]').forEach(item => {
+      item.draggable = true;
+      item.addEventListener('dragstart', navDragStart);
+      item.addEventListener('dragover', navDragOver);
+      item.addEventListener('dragleave', navDragLeave);
+      item.addEventListener('drop', navDrop);
+      item.addEventListener('dragend', navDragEnd);
+    });
+  }
+
+  function navDragStart(e) {
+    navDragSrc = this;
+    this.style.opacity = '0.4';
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', this.dataset.view);
+  }
+  function navDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (this !== navDragSrc) this.style.borderTop = '2px solid var(--accent)';
+  }
+  function navDragLeave() { this.style.borderTop = ''; }
+  function navDrop(e) {
+    e.preventDefault();
+    this.style.borderTop = '';
+    if (this === navDragSrc) return;
+    // Insert dragged item before the drop target
+    navList.insertBefore(navDragSrc, this);
+    saveNavOrder();
+  }
+  function navDragEnd() {
+    this.style.opacity = '';
+    navList.querySelectorAll('.nav-item').forEach(el => { el.style.borderTop = ''; });
+    navDragSrc = null;
+  }
+  function saveNavOrder() {
+    const order = Array.from(navList.querySelectorAll('.nav-item[data-view]')).map(el => el.dataset.view);
+    localStorage.setItem('xinliu_nav_order', JSON.stringify(order));
+  }
+
+  // Mobile touch reorder for nav
+  let navTouchSrc = null;
+  let navTouchDragging = false;
+  let navTouchStartY = 0;
+
+  navList.addEventListener('touchstart', (e) => {
+    const item = e.target.closest('.nav-item[data-view]');
+    if (!item) return;
+    // Long-press to initiate drag (300ms)
+    navTouchStartY = e.touches[0].clientY;
+    navTouchSrc = item;
+    navTouchDragging = false;
+    item._longPressTimer = setTimeout(() => {
+      navTouchDragging = true;
+      item.style.opacity = '0.5';
+      item.style.transform = 'scale(0.95)';
+    }, 300);
+  }, { passive: true });
+
+  navList.addEventListener('touchmove', (e) => {
+    if (!navTouchSrc) return;
+    const dy = Math.abs(e.touches[0].clientY - navTouchStartY);
+    if (!navTouchDragging && dy > 5) { clearTimeout(navTouchSrc._longPressTimer); }
+    if (!navTouchDragging) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const elBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+    navList.querySelectorAll('.nav-item').forEach(el => { el.style.borderTop = ''; });
+    if (elBelow) {
+      const target = elBelow.closest('.nav-item[data-view]');
+      if (target && target !== navTouchSrc) target.style.borderTop = '2px solid var(--accent)';
+    }
+  }, { passive: false });
+
+  navList.addEventListener('touchend', (e) => {
+    if (!navTouchSrc) return;
+    clearTimeout(navTouchSrc._longPressTimer);
+    if (navTouchDragging) {
+      const touch = e.changedTouches[0];
+      const elBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+      if (elBelow) {
+        const target = elBelow.closest('.nav-item[data-view]');
+        if (target && target !== navTouchSrc) {
+          navList.insertBefore(navTouchSrc, target);
+          saveNavOrder();
+        }
+      }
+      navTouchSrc.style.opacity = '';
+      navTouchSrc.style.transform = '';
+    }
+    navList.querySelectorAll('.nav-item').forEach(el => { el.style.borderTop = ''; });
+    navTouchSrc = null;
+    navTouchDragging = false;
+  });
+
+  initNavDrag();
   overlay.addEventListener('click', closeSidebar);
 
   // ===== LLM HELPER =====
@@ -463,9 +586,11 @@
     const sidebarNum = document.getElementById('sidebar-drops-num');
     const dashDrops = document.getElementById('dash-drops');
     const rulesTotal = document.getElementById('drops-rules-total');
+    const shopDrops = document.getElementById('shop-drops-num');
     if (sidebarNum) sidebarNum.textContent = total;
     if (dashDrops) dashDrops.textContent = '\uD83D\uDCA7 ' + total;
     if (rulesTotal) rulesTotal.textContent = '\uD83D\uDCA7 ' + total;
+    if (shopDrops) shopDrops.textContent = total;
   }
 
   // Drops rules modal
@@ -502,7 +627,8 @@
     [...history].reverse().forEach(h => {
       const el = document.createElement('div');
       el.className = 'drops-history-item';
-      el.innerHTML = `<span class="dhi-date">${h.date || '-'}</span><span class="dhi-amount">+${h.amount}</span><span class="dhi-reason">${esc(h.reason || '')}</span>`;
+      const amountStr = h.amount < 0 ? h.amount : '+' + h.amount;
+      el.innerHTML = `<span class="dhi-date">${h.date || '-'}</span><span class="dhi-amount${h.amount < 0 ? ' negative' : ''}">${amountStr}</span><span class="dhi-reason">${esc(h.reason || '')}</span>`;
       dropsHistoryList.appendChild(el);
     });
   }
@@ -637,7 +763,7 @@
   }
 
   const PRIORITY_ORDER = { 'urgent-important': 0, 'important': 1, 'urgent': 2, 'neither': 3 };
-  const PRIORITY_LABELS = { 'urgent-important': '紧急重要', 'important': '重要', 'urgent': '紧急', 'neither': '一般' };
+  const PRIORITY_LABELS = { 'urgent-important': '重要紧急', 'important': '重要', 'urgent': '紧急', 'neither': '一般' };
   const PRIORITY_COLORS = { 'urgent-important': 'var(--q1)', 'important': 'var(--q2)', 'urgent': 'var(--q3)', 'neither': 'var(--q4)' };
 
   function deadlineStatus(dateStr) {
@@ -1067,12 +1193,40 @@
     saveState();
   }
 
+  // ===== MIDNIGHT AUTO-REFRESH =====
+  // Schedule dailyMaintenance to run at exactly 00:00 every day
+  function scheduleMidnightRefresh() {
+    const now = new Date();
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+    const msUntilMidnight = tomorrow - now;
+    setTimeout(() => {
+      dailyMaintenance();
+      renderActiveView();
+      updateDropsDisplay();
+      // After triggering at midnight, schedule the next one (every 24h as fallback)
+      scheduleMidnightRefresh();
+    }, msUntilMidnight);
+  }
+  // Also check on visibility change (covers case where device was sleeping at midnight)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      const today = todayKey();
+      if (state.lastDailyCheck !== today) {
+        dailyMaintenance();
+        renderActiveView();
+        updateDropsDisplay();
+      }
+    }
+  });
+
   // ===== GANTT VIEW =====
   function renderGantt() {
     const container = document.getElementById('gantt-container');
     const today = new Date(todayKey() + 'T00:00:00');
+    const isMobile = window.innerWidth <= 768;
+    const dayCount = isMobile ? 5 : 14;
     const days = [];
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < dayCount; i++) {
       const d = new Date(today);
       d.setDate(d.getDate() + i);
       days.push(d);
@@ -1085,55 +1239,104 @@
       'neither': '#64748b',
     };
 
-    // Filter tasks that have dates within the 14-day range or before
-    const startKey = days[0].toISOString().slice(0,10);
+    // Filter tasks that have dates within the range or before
     const endKey = days[days.length-1].toISOString().slice(0,10);
     const tasksInRange = state.tasks.filter(t => {
       if (!t.date) return false;
       return t.date <= endKey;
     }).sort((a,b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
 
-    let html = '<div class="gantt-chart">';
-    // Header
-    html += '<div class="gantt-header">';
-    html += '<div class="gantt-label-col">任务</div>';
-    days.forEach(d => {
-      const key = d.toISOString().slice(0,10);
-      const isToday = key === todayKey();
-      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-      html += `<div class="gantt-day-col${isToday ? ' today' : ''}${isWeekend ? ' weekend' : ''}">${d.getMonth()+1}/${d.getDate()}<br>周${weekdayNames[d.getDay()]}</div>`;
-    });
+    let html = '';
+    // Priority legend
+    html += '<div class="gantt-legend">';
+    html += '<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#ef4444"></span>重要紧急</span>';
+    html += '<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#6366f1"></span>重要</span>';
+    html += '<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#f97316"></span>紧急</span>';
+    html += '<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#64748b"></span>一般</span>';
     html += '</div>';
 
-    // Rows
-    if (tasksInRange.length === 0) {
-      html += '<div style="padding:2rem;color:var(--text-muted);text-align:center">未来两周暂无任务</div>';
-    }
-    tasksInRange.forEach(t => {
-      html += '<div class="gantt-row">';
-      html += `<div class="gantt-row-label" title="${esc(t.name)}">${esc(t.name)}</div>`;
-      html += '<div class="gantt-row-cells">';
-      // Background cells
+    if (isMobile) {
+      // === MOBILE: Vertical card-based layout (no horizontal scroll needed) ===
+      html += '<div class="gantt-mobile">';
+      // Date tabs
+      html += '<div class="gantt-m-dates">';
+      days.forEach((d, i) => {
+        const key = d.toISOString().slice(0,10);
+        const isToday = key === todayKey();
+        const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+        html += `<div class="gantt-m-date${isToday ? ' today' : ''}${isWeekend ? ' weekend' : ''}">
+          <span class="gantt-m-day">${d.getDate()}</span>
+          <span class="gantt-m-wd">周${weekdayNames[d.getDay()]}</span>
+        </div>`;
+      });
+      html += '</div>';
+      // Task bars below dates
+      if (tasksInRange.length === 0) {
+        html += '<div style="padding:1.5rem;color:var(--text-muted);text-align:center;font-size:.85rem">未来五天暂无任务</div>';
+      }
+      tasksInRange.forEach(t => {
+        const durationMinutes = Number.isFinite(t.duration) ? t.duration : 30;
+        const taskDate = new Date(t.date + 'T00:00:00');
+        const durationDays = Math.max(1, Math.ceil(durationMinutes / 480));
+        const startDiff = Math.round((taskDate - today) / 86400000);
+        const barStart = Math.max(0, startDiff);
+        const barEnd = Math.min(dayCount - 1, barStart + durationDays - 1);
+        if (barStart > dayCount - 1) return;
+        const leftPct = (barStart / dayCount * 100).toFixed(2);
+        const widthPct = ((barEnd - barStart + 1) / dayCount * 100).toFixed(2);
+        const barColor = prioBarColors[t.quadrant] || '#64748b';
+        const prioLabel = PRIORITY_LABELS[t.quadrant] || '一般';
+        html += `<div class="gantt-m-row">
+          <div class="gantt-m-bar${t.done ? ' done' : ''}" style="margin-left:${leftPct}%;width:${widthPct}%;background:${barColor}">
+            <span class="gantt-m-bar-name">${esc(t.name)}</span>
+          </div>
+          <div class="gantt-m-meta">
+            <span class="gantt-m-prio" style="color:${barColor}">${prioLabel}</span>
+            <span class="gantt-m-dur">${durationMinutes}分钟</span>
+          </div>
+        </div>`;
+      });
+      html += '</div>';
+    } else {
+      // === DESKTOP: Traditional horizontal Gantt chart ===
+      html += '<div class="gantt-chart">';
+      html += '<div class="gantt-header">';
+      html += '<div class="gantt-label-col">任务</div>';
       days.forEach(d => {
         const key = d.toISOString().slice(0,10);
         const isToday = key === todayKey();
-        html += `<div class="gantt-cell${isToday ? ' today' : ''}"></div>`;
+        const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+        html += `<div class="gantt-day-col${isToday ? ' today' : ''}${isWeekend ? ' weekend' : ''}">${d.getMonth()+1}/${d.getDate()}<br>周${weekdayNames[d.getDay()]}</div>`;
       });
-      // Bar overlay
-      const taskDate = new Date(t.date + 'T00:00:00');
-      const durationDays = Math.max(1, Math.ceil((t.duration || 30) / 480)); // ~8h workday
-      const startDiff = Math.round((taskDate - today) / 86400000);
-      const barStart = Math.max(0, startDiff);
-      const barEnd = Math.min(13, barStart + durationDays - 1);
-      if (barStart <= 13) {
-        const leftPct = (barStart / 14 * 100).toFixed(2);
-        const widthPct = ((barEnd - barStart + 1) / 14 * 100).toFixed(2);
-        const barColor = prioBarColors[t.quadrant] || '#64748b';
-        html += `<div class="gantt-bar${t.done ? ' done' : ''}" style="left:${leftPct}%;width:${widthPct}%;background:${barColor}">${esc(t.name)}</div>`;
+      html += '</div>';
+
+      if (tasksInRange.length === 0) {
+        html += '<div style="padding:2rem;color:var(--text-muted);text-align:center">未来两周暂无任务</div>';
       }
-      html += '</div></div>';
-    });
-    html += '</div>';
+      tasksInRange.forEach(t => {
+        html += '<div class="gantt-row">';
+        html += `<div class="gantt-row-label" title="${esc(t.name)}">${esc(t.name)}</div>`;
+        html += '<div class="gantt-row-cells">';
+        days.forEach(d => {
+          const key = d.toISOString().slice(0,10);
+          const isToday = key === todayKey();
+          html += `<div class="gantt-cell${isToday ? ' today' : ''}"></div>`;
+        });
+        const taskDate = new Date(t.date + 'T00:00:00');
+        const durationDays = Math.max(1, Math.ceil((t.duration || 30) / 480));
+        const startDiff = Math.round((taskDate - today) / 86400000);
+        const barStart = Math.max(0, startDiff);
+        const barEnd = Math.min(dayCount - 1, barStart + durationDays - 1);
+        if (barStart <= dayCount - 1) {
+          const leftPct = (barStart / dayCount * 100).toFixed(2);
+          const widthPct = ((barEnd - barStart + 1) / dayCount * 100).toFixed(2);
+          const barColor = prioBarColors[t.quadrant] || '#64748b';
+          html += `<div class="gantt-bar${t.done ? ' done' : ''}" style="left:${leftPct}%;width:${widthPct}%;background:${barColor}">${esc(t.name)}</div>`;
+        }
+        html += '</div></div>';
+      });
+      html += '</div>';
+    }
     container.innerHTML = html;
   }
 
@@ -1882,12 +2085,386 @@ ${taskCtx}`;
     draw();
   }
 
+  // ===== HABITS (长期习惯) =====
+  function getHabits() {
+    if (!state.habits) state.habits = [];
+    return state.habits;
+  }
+  function getHabitLogs() {
+    if (!state.habitLogs) state.habitLogs = [];
+    return state.habitLogs;
+  }
+
+  let editingHabitId = null;
+  let loggingHabitId = null;
+
+  const habitModalOverlay = document.getElementById('habit-modal-overlay');
+  const habitLogOverlay = document.getElementById('habit-log-overlay');
+
+  function renderHabits() {
+    const list = document.getElementById('habits-list');
+    const logSection = document.getElementById('habits-log-section');
+    const logDiv = document.getElementById('habits-log');
+    if (!list) return;
+
+    const habits = getHabits();
+    list.innerHTML = '';
+    if (habits.length === 0) {
+      list.innerHTML = '<div class="habits-empty">暂无长期习惯，点击上方按钮添加。<br>长期习惯可反复完成，每次记录时长或次数。</div>';
+    }
+    habits.forEach(h => {
+      const logs = getHabitLogs().filter(l => l.habitId === h.id);
+      const totalVal = logs.reduce((s, l) => s + (l.value || 0), 0);
+      const totalDrops = logs.reduce((s, l) => s + (l.dropsEarned || 0), 0);
+      const todayLogs = logs.filter(l => l.date === todayKey());
+      const todayVal = todayLogs.reduce((s, l) => s + (l.value || 0), 0);
+      const unit = h.type === 'duration' ? '分钟' : '次';
+      const el = document.createElement('div');
+      el.className = 'habit-card';
+      el.innerHTML = `
+        <div class="habit-icon">${h.icon || '🔄'}</div>
+        <div class="habit-info">
+          <div class="habit-name">${esc(h.name)}</div>
+          <div class="habit-stats">
+            <span class="habit-stat">今日: <span class="habit-stat-val">${todayVal} ${unit}</span></span>
+            <span class="habit-stat">累计: <span class="habit-stat-val">${totalVal} ${unit}</span></span>
+            <span class="habit-stat">共 <span class="habit-stat-val">${logs.length}</span> 次</span>
+          </div>
+          <div class="habit-drops-info">💧 累计获得 ${totalDrops} 水滴 · 每${h.type === 'duration' ? '小时' : '次'} +${h.dropsPerUnit} 滴</div>
+        </div>
+        <div class="habit-actions">
+          <button class="habit-btn-log">打卡</button>
+          <button class="habit-btn-edit">编辑</button>
+        </div>
+      `;
+      el.querySelector('.habit-btn-log').addEventListener('click', () => openHabitLogModal(h.id));
+      el.querySelector('.habit-btn-edit').addEventListener('click', () => openHabitEditModal(h.id));
+      list.appendChild(el);
+    });
+
+    // Render logs
+    const allLogs = getHabitLogs();
+    if (allLogs.length > 0) {
+      logSection.style.display = '';
+      logDiv.innerHTML = '';
+      [...allLogs].reverse().slice(0, 30).forEach(l => {
+        const habit = habits.find(h => h.id === l.habitId);
+        const unit = (habit && habit.type === 'duration') ? '分钟' : '次';
+        const el = document.createElement('div');
+        el.className = 'habit-log-item';
+        el.innerHTML = `<span class="hli-date">${l.date}</span><span class="hli-icon">${(habit && habit.icon) || '🔄'}</span><span class="hli-name">${esc((habit && habit.name) || '已删除')}</span><span class="hli-val">${l.value} ${unit}</span><span class="hli-drops">+💧${l.dropsEarned}</span>`;
+        logDiv.appendChild(el);
+      });
+    } else {
+      logSection.style.display = 'none';
+    }
+  }
+
+  // Add habit button
+  document.getElementById('btn-add-habit').addEventListener('click', () => openHabitEditModal(null));
+
+  function openHabitEditModal(id) {
+    editingHabitId = id;
+    const habit = id ? getHabits().find(h => h.id === id) : null;
+    document.getElementById('habit-modal-title').textContent = habit ? '编辑习惯' : '添加习惯';
+    document.getElementById('btn-habit-delete').style.display = habit ? '' : 'none';
+    document.getElementById('habit-edit-name').value = habit ? habit.name : '';
+    document.getElementById('habit-edit-type').value = habit ? habit.type : 'duration';
+    document.getElementById('habit-edit-icon').value = habit ? habit.icon : '';
+    document.getElementById('habit-edit-drops').value = habit ? habit.dropsPerUnit : 2;
+    habitModalOverlay.classList.remove('hidden');
+  }
+
+  document.getElementById('habit-modal-close').addEventListener('click', () => habitModalOverlay.classList.add('hidden'));
+  habitModalOverlay.addEventListener('click', (e) => { if (e.target === habitModalOverlay) habitModalOverlay.classList.add('hidden'); });
+
+  document.getElementById('btn-habit-save').addEventListener('click', () => {
+    const name = document.getElementById('habit-edit-name').value.trim();
+    if (!name) { alert('请输入习惯名称'); return; }
+    const type = document.getElementById('habit-edit-type').value;
+    const icon = document.getElementById('habit-edit-icon').value.trim() || '🔄';
+    const dropsPerUnit = parseInt(document.getElementById('habit-edit-drops').value) || 2;
+    const habits = getHabits();
+    if (editingHabitId) {
+      const h = habits.find(x => x.id === editingHabitId);
+      if (h) { h.name = name; h.type = type; h.icon = icon; h.dropsPerUnit = dropsPerUnit; }
+    } else {
+      habits.push({ id: 'habit-' + genId(), name, type, icon, dropsPerUnit, createdAt: new Date().toISOString() });
+    }
+    saveState();
+    habitModalOverlay.classList.add('hidden');
+    renderHabits();
+  });
+
+  document.getElementById('btn-habit-delete').addEventListener('click', () => {
+    if (!editingHabitId) return;
+    if (confirm('删除此习惯？相关记录将保留。')) {
+      const habits = getHabits();
+      const idx = habits.findIndex(h => h.id === editingHabitId);
+      if (idx >= 0) habits.splice(idx, 1);
+      saveState();
+      habitModalOverlay.classList.add('hidden');
+      renderHabits();
+    }
+  });
+
+  // Habit log (record completion)
+  function openHabitLogModal(id) {
+    loggingHabitId = id;
+    const habit = getHabits().find(h => h.id === id);
+    if (!habit) return;
+    document.getElementById('habit-log-title').textContent = habit.icon + ' ' + habit.name;
+    const isDuration = habit.type === 'duration';
+    document.getElementById('habit-log-label').textContent = isDuration ? '完成时长 (分钟)' : '完成次数';
+    document.getElementById('habit-log-value').value = isDuration ? 30 : 1;
+    updateHabitLogPreview();
+    habitLogOverlay.classList.remove('hidden');
+  }
+
+  function updateHabitLogPreview() {
+    const habit = getHabits().find(h => h.id === loggingHabitId);
+    if (!habit) return;
+    const val = parseInt(document.getElementById('habit-log-value').value) || 0;
+    let drops;
+    if (habit.type === 'duration') {
+      drops = Math.floor(val / 60 * habit.dropsPerUnit);
+      if (drops === 0 && val > 0) drops = Math.max(1, Math.round(val / 60 * habit.dropsPerUnit));
+    } else {
+      drops = val * habit.dropsPerUnit;
+    }
+    document.getElementById('habit-log-drops-preview').textContent = '预计获得 💧 ' + drops + ' 水滴';
+  }
+
+  document.getElementById('habit-log-value').addEventListener('input', updateHabitLogPreview);
+  document.getElementById('habit-log-close').addEventListener('click', () => habitLogOverlay.classList.add('hidden'));
+  habitLogOverlay.addEventListener('click', (e) => { if (e.target === habitLogOverlay) habitLogOverlay.classList.add('hidden'); });
+
+  document.getElementById('btn-habit-log-save').addEventListener('click', () => {
+    const habit = getHabits().find(h => h.id === loggingHabitId);
+    if (!habit) return;
+    const val = parseInt(document.getElementById('habit-log-value').value) || 0;
+    if (val <= 0) { alert('请输入有效数值'); return; }
+    let drops;
+    if (habit.type === 'duration') {
+      drops = Math.floor(val / 60 * habit.dropsPerUnit);
+      if (drops === 0 && val > 0) drops = Math.max(1, Math.round(val / 60 * habit.dropsPerUnit));
+    } else {
+      drops = val * habit.dropsPerUnit;
+    }
+    // Record log
+    getHabitLogs().push({
+      id: 'hlog-' + genId(),
+      habitId: habit.id,
+      date: todayKey(),
+      value: val,
+      dropsEarned: drops,
+    });
+    // Award drops
+    if (drops > 0) {
+      awardDrops(drops, '习惯打卡: ' + habit.name);
+    }
+    saveState();
+    habitLogOverlay.classList.add('hidden');
+    renderHabits();
+    showShopToast(habit.icon + ' 完成！获得 💧' + drops + ' 水滴', 'success');
+  });
+
+  // ===== SHOP (消费商城) =====
+  const DEFAULT_SHOP_ITEMS = [
+    { id: 'shop-1', name: '娱乐型放松/h', icon: '🎮', price: 20, stock: -1 },
+    { id: 'shop-2', name: '成长型放松/h', icon: '📚', price: 10, stock: -1 },
+    { id: 'shop-3', name: '聊天水群/h', icon: '💬', price: 5, stock: -1 },
+    { id: 'shop-4', name: '约会/次', icon: '💕', price: 30, stock: -1 },
+  ];
+
+  function getShopItems() {
+    if (!state.shopItems) state.shopItems = JSON.parse(JSON.stringify(DEFAULT_SHOP_ITEMS));
+    return state.shopItems;
+  }
+
+  function getShopHistory() {
+    if (!state.shopHistory) state.shopHistory = [];
+    return state.shopHistory;
+  }
+
+  function showShopToast(msg, type) {
+    const existing = document.querySelector('.shop-toast');
+    if (existing) existing.remove();
+    const el = document.createElement('div');
+    el.className = 'shop-toast ' + type;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 2500);
+  }
+
+  function buyShopItem(itemId) {
+    const items = getShopItems();
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+    const drops = (state.drops && state.drops.total) || 0;
+    if (drops < item.price) {
+      showShopToast('水滴不足！需要 ' + item.price + ' 滴，当前 ' + drops + ' 滴', 'error');
+      return;
+    }
+    if (item.stock === 0) {
+      showShopToast('商品已售罄！', 'error');
+      return;
+    }
+    // Deduct drops
+    state.drops.total -= item.price;
+    state.drops.history.push({ date: todayKey(), amount: -item.price, reason: '兑换: ' + item.name });
+    // Decrease stock if limited
+    if (item.stock > 0) item.stock--;
+    // Record purchase
+    getShopHistory().push({ date: todayKey(), name: item.name, icon: item.icon, price: item.price });
+    saveState();
+    updateDropsDisplay();
+    renderShop();
+    showShopToast('兑换成功！' + item.icon + ' ' + item.name, 'success');
+  }
+
+  function deleteShopItem(itemId) {
+    const items = getShopItems();
+    const idx = items.findIndex(i => i.id === itemId);
+    if (idx >= 0) {
+      items.splice(idx, 1);
+      saveState();
+      renderShop();
+    }
+  }
+
+  function renderShop() {
+    const grid = document.getElementById('shop-grid');
+    const historyDiv = document.getElementById('shop-history');
+    const dropsNum = document.getElementById('shop-drops-num');
+    if (!grid) return;
+    const drops = (state.drops && state.drops.total) || 0;
+    dropsNum.textContent = drops;
+
+    const items = getShopItems();
+    grid.innerHTML = '';
+    items.forEach(item => {
+      const canBuy = drops >= item.price && item.stock !== 0;
+      const soldOut = item.stock === 0;
+      const stockText = item.stock < 0 ? '无限库存' : (soldOut ? '已售罄' : '剩余 ' + item.stock + ' 件');
+      const el = document.createElement('div');
+      el.className = 'shop-item';
+      el.innerHTML = `
+        <button class="shop-item-delete" title="删除商品">&times;</button>
+        <div class="shop-item-icon">${item.icon || '🎁'}</div>
+        <div class="shop-item-name">${esc(item.name)}</div>
+        <div class="shop-item-price">💧 ${item.price} 水滴</div>
+        <div class="shop-item-stock">${stockText}</div>
+        <button class="btn-shop-buy${soldOut ? ' sold-out' : ''}" ${!canBuy ? 'disabled' : ''}>${soldOut ? '已售罄' : '兑换'}</button>
+      `;
+      el.querySelector('.btn-shop-buy').addEventListener('click', () => buyShopItem(item.id));
+      el.querySelector('.shop-item-delete').addEventListener('click', () => {
+        if (confirm('删除商品「' + item.name + '」？')) deleteShopItem(item.id);
+      });
+      grid.appendChild(el);
+    });
+
+    // Purchase history
+    const history = getShopHistory();
+    historyDiv.innerHTML = '';
+    if (history.length === 0) {
+      historyDiv.innerHTML = '<div class="shop-history-empty">暂无购买记录，用水滴兑换奖励犒劳自己吧！</div>';
+    } else {
+      [...history].reverse().forEach(h => {
+        const el = document.createElement('div');
+        el.className = 'shop-history-item';
+        el.innerHTML = `<span class="shi-date">${h.date}</span><span class="shi-name">${h.icon || '🎁'} ${esc(h.name)}</span><span class="shi-price">-💧${h.price}</span>`;
+        historyDiv.appendChild(el);
+      });
+    }
+  }
+
+  // Add custom shop item
+  document.getElementById('btn-shop-add').addEventListener('click', () => {
+    const nameInput = document.getElementById('shop-new-name');
+    const priceInput = document.getElementById('shop-new-price');
+    const iconInput = document.getElementById('shop-new-icon');
+    const name = nameInput.value.trim();
+    const price = parseInt(priceInput.value);
+    const icon = iconInput.value.trim() || '🎁';
+    if (!name) { showShopToast('请输入商品名称', 'error'); return; }
+    if (!price || price <= 0) { showShopToast('请输入有效价格', 'error'); return; }
+    const items = getShopItems();
+    items.push({ id: 'shop-' + genId(), name, icon, price, stock: -1 });
+    saveState();
+    nameInput.value = '';
+    priceInput.value = '';
+    iconInput.value = '';
+    renderShop();
+    showShopToast('商品已添加！', 'success');
+  });
+
   // ===== INIT =====
   // Global touch event listeners for mobile drag
   document.addEventListener('touchmove', handleTouchMove, { passive: false });
   document.addEventListener('touchend', handleTouchEnd);
 
+  // ===== DEMO DATA INJECTION =====
+  // Inject demo data if state is empty (for demonstration purposes)
+  function injectDemoData() {
+    if (localStorage.getItem('xinliu_demo_injected') === '1') return;
+    if (state.tasks.length > 0 || (state.habits && state.habits.length > 0)) return; // already has data
+    const today = todayKey();
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowKey = tomorrow.toISOString().slice(0, 10);
+    const day3 = new Date(); day3.setDate(day3.getDate() + 2);
+    const day3Key = day3.toISOString().slice(0, 10);
+    const day4 = new Date(); day4.setDate(day4.getDate() + 3);
+    const day4Key = day4.toISOString().slice(0, 10);
+
+    // Demo tasks for board & gantt
+    state.tasks = [
+      { id: 'demo-1', name: '完成项目方案PPT', quadrant: 'urgent-important', tags: [], date: today, time: '09:00', duration: 120, note: '客户下午要看', recurrence: 'none', subtasks: [{name:'整理数据',done:true},{name:'制作图表',done:false}], done: false, sortOrder: 0, createdAt: new Date().toISOString() },
+      { id: 'demo-2', name: '回复重要邮件', quadrant: 'urgent-important', tags: [], date: today, time: '10:30', duration: 30, note: '', recurrence: 'none', subtasks: [], done: false, sortOrder: 1, createdAt: new Date().toISOString() },
+      { id: 'demo-3', name: '阅读《深度工作》第5章', quadrant: 'important', tags: [], date: today, time: '', duration: 45, note: '每天坚持一点', recurrence: 'none', subtasks: [], done: false, sortOrder: 2, createdAt: new Date().toISOString() },
+      { id: 'demo-4', name: '整理本周工作总结', quadrant: 'important', tags: [], date: tomorrowKey, time: '', duration: 60, note: '', recurrence: 'none', subtasks: [], done: false, sortOrder: 3, createdAt: new Date().toISOString() },
+      { id: 'demo-5', name: '约牙医检查', quadrant: 'urgent', tags: [], date: day3Key, time: '14:00', duration: 60, note: '记得带医保卡', recurrence: 'none', subtasks: [], done: false, sortOrder: 4, createdAt: new Date().toISOString() },
+      { id: 'demo-6', name: '学习TypeScript泛型', quadrant: 'important', tags: [], date: day4Key, time: '', duration: 90, note: '', recurrence: 'none', subtasks: [{name:'看文档',done:false},{name:'写练习',done:false}], done: false, sortOrder: 5, createdAt: new Date().toISOString() },
+      { id: 'demo-7', name: '整理房间', quadrant: 'neither', tags: [], date: tomorrowKey, time: '', duration: 40, note: '', recurrence: 'weekly', subtasks: [], done: false, sortOrder: 6, createdAt: new Date().toISOString() },
+      { id: 'demo-8', name: '晨间冥想', quadrant: 'important', tags: [], date: today, time: '07:00', duration: 15, note: '', recurrence: 'daily', subtasks: [], done: true, sortOrder: 7, createdAt: new Date().toISOString() },
+    ];
+
+    // Demo drops
+    state.drops = { total: 68, history: [
+      { date: today, amount: 8, reason: '完成任务: 完成项目方案PPT' },
+      { date: today, amount: 2, reason: '完成任务: 晨间冥想' },
+      { date: today, amount: 4, reason: '习惯打卡: 阅读' },
+      { date: today, amount: 6, reason: '习惯打卡: 运动' },
+      { date: today, amount: 3, reason: '习惯打卡: 冥想' },
+    ]};
+
+    // Demo habits
+    state.habits = [
+      { id: 'habit-demo-1', name: '阅读', type: 'duration', icon: '📖', dropsPerUnit: 4, createdAt: new Date().toISOString() },
+      { id: 'habit-demo-2', name: '运动健身', type: 'duration', icon: '🏃', dropsPerUnit: 6, createdAt: new Date().toISOString() },
+      { id: 'habit-demo-3', name: '冥想', type: 'duration', icon: '🧘', dropsPerUnit: 3, createdAt: new Date().toISOString() },
+      { id: 'habit-demo-4', name: '背单词', type: 'count', icon: '🇬🇧', dropsPerUnit: 1, createdAt: new Date().toISOString() },
+      { id: 'habit-demo-5', name: '写日记', type: 'count', icon: '✍️', dropsPerUnit: 3, createdAt: new Date().toISOString() },
+    ];
+
+    // Demo habit logs
+    state.habitLogs = [
+      { id: 'hlog-d1', habitId: 'habit-demo-1', date: today, value: 60, dropsEarned: 4 },
+      { id: 'hlog-d2', habitId: 'habit-demo-2', date: today, value: 45, dropsEarned: 6 },  // rounded up
+      { id: 'hlog-d3', habitId: 'habit-demo-3', date: today, value: 20, dropsEarned: 3 },
+    ];
+
+    // Demo shop history
+    state.shopHistory = [
+      { date: today, name: '聊天水群/h', icon: '💬', price: 5 },
+    ];
+
+    saveState();
+    localStorage.setItem('xinliu_demo_injected', '1');
+  }
+
   // 先用本地数据渲染（避免白屏），然后异步加载服务端数据覆盖
+  injectDemoData();
   loadSettingsUI();
   renderDashboard();
   renderBoard();
@@ -1895,5 +2472,7 @@ ${taskCtx}`;
   updateDropsDisplay();
   // 异步加载服务端数据（加载完成后才允许写入服务端、才执行 dailyMaintenance）
   loadStateFromServer();
+  // 启动午夜自动刷新定时器
+  scheduleMidnightRefresh();
 
 })();
