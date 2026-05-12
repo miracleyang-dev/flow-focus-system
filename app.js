@@ -168,14 +168,18 @@
     return activeNav ? activeNav.dataset.view : 'board';
   }
 
+  const VIEW_RENDERERS = {
+    dashboard: () => renderDashboard(),
+    board: () => renderBoard(),
+    gantt: () => renderGantt(),
+    habits: () => renderHabits(),
+    shop: () => renderShop(),
+    settings: () => { loadSettingsUI(); renderSettingsLists(); },
+  };
+
   function renderActiveView() {
-    const v = getActiveViewName();
-    if (v === 'dashboard') renderDashboard();
-    else if (v === 'board') renderBoard();
-    else if (v === 'gantt') renderGantt();
-    else if (v === 'habits') renderHabits();
-    else if (v === 'shop') renderShop();
-    else if (v === 'settings') { loadSettingsUI(); renderSettingsLists(); }
+    const fn = VIEW_RENDERERS[getActiveViewName()];
+    if (fn) fn();
   }
 
   async function pollServerSync() {
@@ -308,9 +312,6 @@
 
   // ===== TAG HELPERS =====
   function getTag(id) { return (state.tags || []).find(t => t.id === id); }
-  function getTaskTagNames(task) {
-    return (task.tags || []).map(id => { const t = getTag(id); return t ? t.name : ''; }).filter(Boolean);
-  }
   function renderTagChips(tagIds) {
     return (tagIds || []).map(id => {
       const tag = getTag(id);
@@ -334,12 +335,8 @@
     views.forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
     mobileTitle.textContent = viewTitles[name] || '';
     closeSidebar();
-    if (name === 'dashboard') renderDashboard();
-    if (name === 'board') renderBoard();
-    if (name === 'gantt') renderGantt();
-    if (name === 'habits') renderHabits();
-    if (name === 'shop') renderShop();
-    if (name === 'settings') renderSettingsLists();
+    const fn = VIEW_RENDERERS[name];
+    if (fn) fn();
   }
 
   navItems.forEach(n => n.addEventListener('click', () => switchView(n.dataset.view)));
@@ -615,6 +612,22 @@
 
   function todayKey() { return new Date().toISOString().slice(0, 10); }
 
+  // ===== SHARED HELPERS =====
+  function getDropsHistory() { return getDropsHistory(); }
+  function dateRange(days) {
+    const today = todayKey();
+    const start = new Date();
+    start.setDate(start.getDate() - (days - 1));
+    return { startKey: start.toISOString().slice(0, 10), today };
+  }
+  function filterByRange(items, startKey, endKey) {
+    return items.filter(i => i.date >= startKey && i.date <= endKey);
+  }
+  function setupModalClose(overlay, closeBtn) {
+    if (closeBtn) closeBtn.addEventListener('click', () => overlay.classList.add('hidden'));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.add('hidden'); });
+  }
+
   // ===== DROPS SYSTEM =====
   const PRIORITY_WEIGHTS = { 'urgent-important': 4, 'important': 3, 'urgent': 2, 'neither': 1 };
 
@@ -650,12 +663,7 @@
     updateDropsDisplay();
     dropsRulesOverlay.classList.remove('hidden');
   });
-  document.getElementById('drops-rules-close').addEventListener('click', () => {
-    dropsRulesOverlay.classList.add('hidden');
-  });
-  dropsRulesOverlay.addEventListener('click', (e) => {
-    if (e.target === dropsRulesOverlay) dropsRulesOverlay.classList.add('hidden');
-  });
+  setupModalClose(dropsRulesOverlay, document.getElementById('drops-rules-close'));
 
   // Drops history toggle
   const dropsHistoryList = document.getElementById('drops-history-list');
@@ -668,7 +676,7 @@
   });
 
   function renderDropsHistory() {
-    const history = (state.drops && state.drops.history) || [];
+    const history = getDropsHistory();
     dropsHistoryList.innerHTML = '';
     if (history.length === 0) {
       dropsHistoryList.innerHTML = '<div class="drops-history-empty">暂无水滴记录，完成任务即可获得水滴。</div>';
@@ -1464,80 +1472,73 @@
   // ===== SUMMARY VIEW (近期总结) =====
   let lastSummaryText = '';
 
-  function buildSummaryContext(days) {
-    const today = todayKey();
-    const now = new Date();
-    const startDate = new Date(now);
-    startDate.setDate(startDate.getDate() - (days - 1));
-    const startKey = startDate.toISOString().slice(0, 10);
-
-    // === Three structured log sources (all survive daily cleanup) ===
-    const taskLogs = getTaskLogs().filter(l => l.date >= startKey && l.date <= today);
-    const habitLogs = getHabitLogs().filter(l => l.date >= startKey && l.date <= today);
-    const shopHistory = getShopHistory().filter(h => h.date >= startKey && h.date <= today);
+  // Shared data extraction for both text context and HTML template
+  function extractSummaryData(days) {
+    const { startKey, today } = dateRange(days);
+    const taskLogs = filterByRange(getTaskLogs(), startKey, today);
+    const habitLogs = filterByRange(getHabitLogs(), startKey, today);
+    const shopHist = filterByRange(getShopHistory(), startKey, today);
     const habits = getHabits();
-
-    // Pending tasks still in state
     const pendingTasks = state.tasks.filter(t => !t.done && t.date && t.date >= startKey && t.date <= today);
+    const allDrops = filterByRange(getDropsHistory(), startKey, today);
+    const dropsEarned = allDrops.filter(h => h.amount > 0).reduce((s, h) => s + h.amount, 0);
+    const dropsSpent = allDrops.filter(h => h.amount < 0).reduce((s, h) => s + Math.abs(h.amount), 0);
+    // Fallback task list from drops history (for data before taskLogs existed)
+    const taskDropsFallback = taskLogs.length === 0
+      ? allDrops.filter(h => h.amount > 0 && h.reason && h.reason.startsWith('完成任务:'))
+      : [];
+    const taskCount = taskLogs.length || taskDropsFallback.length;
+    return { startKey, today, taskLogs, habitLogs, shopHist, habits, pendingTasks, allDrops, dropsEarned, dropsSpent, taskDropsFallback, taskCount };
+  }
 
-    // Drops summary
-    const allDropsInRange = (state.drops && state.drops.history || []).filter(h => h.date >= startKey && h.date <= today);
-    const dropsEarned = allDropsInRange.filter(h => h.amount > 0).reduce((s, h) => s + h.amount, 0);
-    const dropsSpent = allDropsInRange.filter(h => h.amount < 0).reduce((s, h) => s + Math.abs(h.amount), 0);
+  function buildSummaryContext(days) {
+    const d = extractSummaryData(days);
 
-    // Build text data
-    let ctx = `总结范围: ${startKey} 至 ${today} (${days} 天)\n\n`;
+    let ctx = `总结范围: ${d.startKey} 至 ${d.today} (${days} 天)\n\n`;
 
-    // --- Task completion (from taskLogs, fallback to drops.history for older data) ---
     ctx += `【任务完成情况】\n`;
-    if (taskLogs.length > 0) {
-      ctx += `完成任务数: ${taskLogs.length} 个\n`;
-      taskLogs.forEach(l => {
+    if (d.taskLogs.length > 0) {
+      ctx += `完成任务数: ${d.taskLogs.length} 个\n`;
+      d.taskLogs.forEach(l => {
         ctx += `  - ${l.name} (${PRIORITY_LABELS[l.quadrant] || '一般'}, 预估${l.duration}分钟, +${l.dropsEarned}水滴, ${l.date})\n`;
       });
     } else {
-      // Fallback: use drops.history for data before taskLogs existed
-      const taskDrops = allDropsInRange.filter(h => h.amount > 0 && h.reason && h.reason.startsWith('完成任务:'));
-      ctx += `完成任务数: ${taskDrops.length} 个\n`;
-      taskDrops.forEach(h => {
+      ctx += `完成任务数: ${d.taskDropsFallback.length} 个\n`;
+      d.taskDropsFallback.forEach(h => {
         ctx += `  - ${h.reason.replace('完成任务: ', '')} (+${h.amount}水滴, ${h.date})\n`;
       });
     }
-    ctx += `待完成: ${pendingTasks.length} 个\n`;
-    if (pendingTasks.length > 0) {
-      pendingTasks.forEach(t => {
-        ctx += `  - ${t.name} (${PRIORITY_LABELS[t.quadrant] || '一般'}, 截止: ${t.date})\n`;
-      });
-    }
+    ctx += `待完成: ${d.pendingTasks.length} 个\n`;
+    d.pendingTasks.forEach(t => {
+      ctx += `  - ${t.name} (${PRIORITY_LABELS[t.quadrant] || '一般'}, 截止: ${t.date})\n`;
+    });
 
-    // --- Habit logs ---
     ctx += `\n【习惯打卡情况】\n`;
-    if (habitLogs.length === 0) {
+    if (d.habitLogs.length === 0) {
       ctx += `该时段无打卡记录\n`;
     } else {
       const habitSummary = {};
-      habitLogs.forEach(l => {
+      d.habitLogs.forEach(l => {
         if (!habitSummary[l.habitId]) habitSummary[l.habitId] = { count: 0, totalVal: 0, totalDrops: 0 };
         habitSummary[l.habitId].count++;
         habitSummary[l.habitId].totalVal += l.value || 0;
         habitSummary[l.habitId].totalDrops += l.dropsEarned || 0;
       });
       Object.keys(habitSummary).forEach(hid => {
-        const habit = habits.find(h => h.id === hid);
+        const habit = d.habits.find(h => h.id === hid);
         const s = habitSummary[hid];
         const unit = (habit && habit.type === 'duration') ? 'h' : '次';
         ctx += `  - ${habit ? habit.icon + ' ' + habit.name : '已删除习惯'}: 打卡 ${s.count} 次, 累计 ${s.totalVal} ${unit}, 获得 ${s.totalDrops} 水滴\n`;
       });
     }
 
-    // --- Shop consumption ---
     ctx += `\n【消费商城情况】\n`;
-    if (shopHistory.length === 0) {
+    if (d.shopHist.length === 0) {
       ctx += `该时段无消费记录\n`;
     } else {
-      ctx += `消费次数: ${shopHistory.length} 次\n`;
+      ctx += `消费次数: ${d.shopHist.length} 次\n`;
       const shopSummary = {};
-      shopHistory.forEach(h => {
+      d.shopHist.forEach(h => {
         if (!shopSummary[h.name]) shopSummary[h.name] = { count: 0, totalSpent: 0, icon: h.icon };
         shopSummary[h.name].count++;
         shopSummary[h.name].totalSpent += h.price || 0;
@@ -1548,90 +1549,60 @@
       });
     }
 
-    // --- Drops overview ---
     ctx += `\n【水滴收支】\n`;
-    ctx += `期间获得水滴: ${dropsEarned} 滴\n`;
-    ctx += `期间消费水滴: ${dropsSpent} 滴\n`;
+    ctx += `期间获得水滴: ${d.dropsEarned} 滴\n`;
+    ctx += `期间消费水滴: ${d.dropsSpent} 滴\n`;
     ctx += `当前水滴余额: ${(state.drops && state.drops.total) || 0} 滴\n`;
 
     return ctx;
   }
 
   function buildSummaryTemplate(days) {
-    const today = todayKey();
-    const now = new Date();
-    const startDate = new Date(now);
-    startDate.setDate(startDate.getDate() - (days - 1));
-    const startKey = startDate.toISOString().slice(0, 10);
-
-    // Three structured log sources
-    const taskLogs = getTaskLogs().filter(l => l.date >= startKey && l.date <= today);
-    const habitLogs = getHabitLogs().filter(l => l.date >= startKey && l.date <= today);
-    const shopHist = getShopHistory().filter(h => h.date >= startKey && h.date <= today);
-    const habits = getHabits();
-    const pendingTasks = state.tasks.filter(t => !t.done && t.date && t.date >= startKey && t.date <= today);
-
-    // Drops
-    const allDropsInRange = (state.drops && state.drops.history || []).filter(h => h.date >= startKey && h.date <= today);
-    const dropsEarned = allDropsInRange.filter(h => h.amount > 0).reduce((s, h) => s + h.amount, 0);
-    const dropsSpent = allDropsInRange.filter(h => h.amount < 0).reduce((s, h) => s + Math.abs(h.amount), 0);
-
-    // Determine task completion count (taskLogs preferred, fallback to drops)
-    let taskCount = taskLogs.length;
-    if (taskCount === 0) {
-      taskCount = allDropsInRange.filter(h => h.amount > 0 && h.reason && h.reason.startsWith('完成任务:')).length;
-    }
+    const d = extractSummaryData(days);
 
     let html = '';
-    // Data overview
-    html += `<div class="summary-section"><h4>📊 数据概览 (${startKey} ~ ${today})</h4><ul>`;
-    html += `<li>完成任务: <strong>${taskCount}</strong> 个</li>`;
-    html += `<li>待完成任务: <strong>${pendingTasks.length}</strong> 个</li>`;
-    html += `<li>习惯打卡: <strong>${habitLogs.length}</strong> 次</li>`;
-    html += `<li>消费兑换: <strong>${shopHist.length}</strong> 次</li>`;
-    html += `<li>获得水滴: <strong style="color:var(--cyan)">${dropsEarned}</strong> 滴</li>`;
-    html += `<li>消费水滴: <strong style="color:var(--text-muted)">${dropsSpent}</strong> 滴</li>`;
+    html += `<div class="summary-section"><h4>📊 数据概览 (${d.startKey} ~ ${d.today})</h4><ul>`;
+    html += `<li>完成任务: <strong>${d.taskCount}</strong> 个</li>`;
+    html += `<li>待完成任务: <strong>${d.pendingTasks.length}</strong> 个</li>`;
+    html += `<li>习惯打卡: <strong>${d.habitLogs.length}</strong> 次</li>`;
+    html += `<li>消费兑换: <strong>${d.shopHist.length}</strong> 次</li>`;
+    html += `<li>获得水滴: <strong style="color:var(--cyan)">${d.dropsEarned}</strong> 滴</li>`;
+    html += `<li>消费水滴: <strong style="color:var(--text-muted)">${d.dropsSpent}</strong> 滴</li>`;
     html += `</ul></div>`;
 
     // Completed tasks
-    if (taskLogs.length > 0) {
+    if (d.taskLogs.length > 0) {
       html += `<div class="summary-section"><h4>✅ 已完成任务</h4><ul>`;
-      taskLogs.forEach(l => {
+      d.taskLogs.forEach(l => {
         html += `<li>${esc(l.name)} <span style="color:var(--text-muted)">(${PRIORITY_LABELS[l.quadrant] || '一般'}, ${l.duration}分钟, +${l.dropsEarned}💧, ${l.date})</span></li>`;
       });
       html += `</ul></div>`;
-    } else {
-      // Fallback for older data without taskLogs
-      const taskDrops = allDropsInRange.filter(h => h.amount > 0 && h.reason && h.reason.startsWith('完成任务:'));
-      if (taskDrops.length > 0) {
-        html += `<div class="summary-section"><h4>✅ 已完成任务</h4><ul>`;
-        taskDrops.forEach(h => {
-          html += `<li>${esc(h.reason.replace('完成任务: ', ''))} <span style="color:var(--text-muted)">(+${h.amount}💧, ${h.date})</span></li>`;
-        });
-        html += `</ul></div>`;
-      }
+    } else if (d.taskDropsFallback.length > 0) {
+      html += `<div class="summary-section"><h4>✅ 已完成任务</h4><ul>`;
+      d.taskDropsFallback.forEach(h => {
+        html += `<li>${esc(h.reason.replace('完成任务: ', ''))} <span style="color:var(--text-muted)">(+${h.amount}💧, ${h.date})</span></li>`;
+      });
+      html += `</ul></div>`;
     }
 
-    // Pending tasks
-    if (pendingTasks.length > 0) {
+    if (d.pendingTasks.length > 0) {
       html += `<div class="summary-section"><h4>📋 待完成任务</h4><ul>`;
-      pendingTasks.forEach(t => {
+      d.pendingTasks.forEach(t => {
         html += `<li>${esc(t.name)} <span style="color:var(--text-muted)">(${PRIORITY_LABELS[t.quadrant] || '一般'}, 截止: ${t.date})</span></li>`;
       });
       html += `</ul></div>`;
     }
 
-    // Habit summary
-    if (habitLogs.length > 0) {
+    if (d.habitLogs.length > 0) {
       html += `<div class="summary-section"><h4>🔄 习惯打卡</h4><ul>`;
       const habitMap = {};
-      habitLogs.forEach(l => {
+      d.habitLogs.forEach(l => {
         if (!habitMap[l.habitId]) habitMap[l.habitId] = { count: 0, totalVal: 0 };
         habitMap[l.habitId].count++;
         habitMap[l.habitId].totalVal += l.value || 0;
       });
       Object.keys(habitMap).forEach(hid => {
-        const habit = habits.find(h => h.id === hid);
+        const habit = d.habits.find(h => h.id === hid);
         const s = habitMap[hid];
         const unit = (habit && habit.type === 'duration') ? 'h' : '次';
         html += `<li>${habit ? habit.icon + ' ' + habit.name : '已删除'}: 打卡 ${s.count} 次, 累计 ${s.totalVal} ${unit}</li>`;
@@ -1639,11 +1610,10 @@
       html += `</ul></div>`;
     }
 
-    // Shop consumption
-    if (shopHist.length > 0) {
+    if (d.shopHist.length > 0) {
       html += `<div class="summary-section"><h4>🛒 消费兑换</h4><ul>`;
       const shopMap = {};
-      shopHist.forEach(h => {
+      d.shopHist.forEach(h => {
         if (!shopMap[h.name]) shopMap[h.name] = { count: 0, total: 0, icon: h.icon };
         shopMap[h.name].count++;
         shopMap[h.name].total += h.price || 0;
@@ -2267,8 +2237,7 @@
     habitModalOverlay.classList.remove('hidden');
   }
 
-  document.getElementById('habit-modal-close').addEventListener('click', () => habitModalOverlay.classList.add('hidden'));
-  habitModalOverlay.addEventListener('click', (e) => { if (e.target === habitModalOverlay) habitModalOverlay.classList.add('hidden'); });
+  setupModalClose(habitModalOverlay, document.getElementById('habit-modal-close'));
 
   document.getElementById('btn-habit-save').addEventListener('click', async () => {
     const name = document.getElementById('habit-edit-name').value.trim();
@@ -2357,8 +2326,7 @@
   }
 
   document.getElementById('habit-log-value').addEventListener('input', updateHabitLogPreview);
-  document.getElementById('habit-log-close').addEventListener('click', () => habitLogOverlay.classList.add('hidden'));
-  habitLogOverlay.addEventListener('click', (e) => { if (e.target === habitLogOverlay) habitLogOverlay.classList.add('hidden'); });
+  setupModalClose(habitLogOverlay, document.getElementById('habit-log-close'));
 
   document.getElementById('btn-habit-log-save').addEventListener('click', () => {
     const habit = getHabits().find(h => h.id === loggingHabitId);
@@ -2540,8 +2508,7 @@
     shopEditOverlay.classList.remove('hidden');
   }
 
-  document.getElementById('shop-edit-close').addEventListener('click', () => shopEditOverlay.classList.add('hidden'));
-  shopEditOverlay.addEventListener('click', (e) => { if (e.target === shopEditOverlay) shopEditOverlay.classList.add('hidden'); });
+  setupModalClose(shopEditOverlay, document.getElementById('shop-edit-close'));
 
   document.getElementById('btn-shop-edit-regen-emoji').addEventListener('click', async () => {
     const name = document.getElementById('shop-edit-name').value.trim();
