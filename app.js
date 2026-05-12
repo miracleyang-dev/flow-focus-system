@@ -385,20 +385,41 @@
   function navDragOver(e) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    if (this !== navDragSrc) this.style.borderTop = '2px solid var(--accent)';
+    if (this !== navDragSrc) {
+      const items = Array.from(navList.querySelectorAll('.nav-item[data-view]'));
+      const srcIdx = items.indexOf(navDragSrc);
+      const targetIdx = items.indexOf(this);
+      this.style.borderTop = '';
+      this.style.borderBottom = '';
+      if (srcIdx < targetIdx) {
+        this.style.borderBottom = '2px solid var(--accent)';
+      } else {
+        this.style.borderTop = '2px solid var(--accent)';
+      }
+    }
   }
-  function navDragLeave() { this.style.borderTop = ''; }
+  function navDragLeave() { this.style.borderTop = ''; this.style.borderBottom = ''; }
   function navDrop(e) {
     e.preventDefault();
     this.style.borderTop = '';
+    this.style.borderBottom = '';
     if (this === navDragSrc) return;
-    // Insert dragged item before the drop target
-    navList.insertBefore(navDragSrc, this);
+    // Determine drag direction to insert correctly
+    const items = Array.from(navList.querySelectorAll('.nav-item[data-view]'));
+    const srcIdx = items.indexOf(navDragSrc);
+    const targetIdx = items.indexOf(this);
+    if (srcIdx < targetIdx) {
+      // Dragging downward: insert after target
+      navList.insertBefore(navDragSrc, this.nextSibling);
+    } else {
+      // Dragging upward: insert before target
+      navList.insertBefore(navDragSrc, this);
+    }
     saveNavOrder();
   }
   function navDragEnd() {
     this.style.opacity = '';
-    navList.querySelectorAll('.nav-item').forEach(el => { el.style.borderTop = ''; });
+    navList.querySelectorAll('.nav-item').forEach(el => { el.style.borderTop = ''; el.style.borderBottom = ''; });
     navDragSrc = null;
   }
   function saveNavOrder() {
@@ -433,10 +454,19 @@
     e.preventDefault();
     const touch = e.touches[0];
     const elBelow = document.elementFromPoint(touch.clientX, touch.clientY);
-    navList.querySelectorAll('.nav-item').forEach(el => { el.style.borderTop = ''; });
+    navList.querySelectorAll('.nav-item').forEach(el => { el.style.borderTop = ''; el.style.borderBottom = ''; });
     if (elBelow) {
       const target = elBelow.closest('.nav-item[data-view]');
-      if (target && target !== navTouchSrc) target.style.borderTop = '2px solid var(--accent)';
+      if (target && target !== navTouchSrc) {
+        const items = Array.from(navList.querySelectorAll('.nav-item[data-view]'));
+        const srcIdx = items.indexOf(navTouchSrc);
+        const targetIdx = items.indexOf(target);
+        if (srcIdx < targetIdx) {
+          target.style.borderBottom = '2px solid var(--accent)';
+        } else {
+          target.style.borderTop = '2px solid var(--accent)';
+        }
+      }
     }
   }, { passive: false });
 
@@ -449,14 +479,21 @@
       if (elBelow) {
         const target = elBelow.closest('.nav-item[data-view]');
         if (target && target !== navTouchSrc) {
-          navList.insertBefore(navTouchSrc, target);
+          const items = Array.from(navList.querySelectorAll('.nav-item[data-view]'));
+          const srcIdx = items.indexOf(navTouchSrc);
+          const targetIdx = items.indexOf(target);
+          if (srcIdx < targetIdx) {
+            navList.insertBefore(navTouchSrc, target.nextSibling);
+          } else {
+            navList.insertBefore(navTouchSrc, target);
+          }
           saveNavOrder();
         }
       }
       navTouchSrc.style.opacity = '';
       navTouchSrc.style.transform = '';
     }
-    navList.querySelectorAll('.nav-item').forEach(el => { el.style.borderTop = ''; });
+    navList.querySelectorAll('.nav-item').forEach(el => { el.style.borderTop = ''; el.style.borderBottom = ''; });
     navTouchSrc = null;
     navTouchDragging = false;
   });
@@ -1011,6 +1048,11 @@
     });
   }
 
+  function getTaskLogs() {
+    if (!state.taskLogs) state.taskLogs = [];
+    return state.taskLogs;
+  }
+
   function toggleDone(id) {
     const t = state.tasks.find(x => x.id === id);
     if (!t) return;
@@ -1019,9 +1061,19 @@
     saveState();
     renderBoard();
     if (!wasDone && t.done) {
-      // Award drops for task completion
+      // Record structured task completion log
       const weight = PRIORITY_WEIGHTS[t.quadrant] || 1;
       const dropAmount = Math.floor((t.duration || 30) / 60 * weight);
+      getTaskLogs().push({
+        id: 'tlog-' + genId(),
+        taskId: t.id,
+        name: t.name,
+        quadrant: t.quadrant,
+        duration: t.duration || 30,
+        date: todayKey(),
+        dropsEarned: dropAmount,
+      });
+      // Award drops for task completion
       awardDrops(dropAmount, '完成任务: ' + t.name);
       // Simple card animation on completion
       const card = document.querySelector(`.task-card[data-id="${id}"]`);
@@ -1225,12 +1277,22 @@
 
     // 2. Then: remove completed NON-recurring tasks from previous days
     // Recurring tasks are never auto-deleted — they persist and keep generating
+    // Note: summary data is sourced from taskLogs/habitLogs/shopHistory, so deletion is safe
     const beforeCount = state.tasks.length;
     state.tasks = state.tasks.filter(t => {
       if (t.done && t.date && t.date < today && (!t.recurrence || t.recurrence === 'none')) return false;
       return true;
     });
     if (state.tasks.length !== beforeCount) changed = true;
+
+    // 3. Trim logs to last 90 days to prevent unbounded growth
+    const cutoff90 = new Date();
+    cutoff90.setDate(cutoff90.getDate() - 90);
+    const cutoffKey = cutoff90.toISOString().slice(0, 10);
+    if (state.taskLogs) state.taskLogs = state.taskLogs.filter(l => l.date >= cutoffKey);
+    if (state.habitLogs) state.habitLogs = state.habitLogs.filter(l => l.date >= cutoffKey);
+    if (state.shopHistory) state.shopHistory = state.shopHistory.filter(h => h.date >= cutoffKey);
+    if (state.drops && state.drops.history) state.drops.history = state.drops.history.filter(h => h.date >= cutoffKey);
 
     state.lastDailyCheck = today;
     saveState();
@@ -1260,6 +1322,22 @@
         updateDropsDisplay();
       }
     }
+  });
+
+  // ===== MANUAL REFRESH BUTTON =====
+  document.getElementById('btn-manual-refresh').addEventListener('click', function() {
+    const btn = this;
+    btn.classList.add('refreshing');
+    btn.disabled = true;
+    // Force daily maintenance regardless of lastDailyCheck
+    state.lastDailyCheck = '';
+    dailyMaintenance();
+    renderActiveView();
+    updateDropsDisplay();
+    setTimeout(() => {
+      btn.classList.remove('refreshing');
+      btn.disabled = false;
+    }, 800);
   });
 
   // ===== GANTT VIEW =====
@@ -1393,26 +1471,36 @@
     startDate.setDate(startDate.getDate() - (days - 1));
     const startKey = startDate.toISOString().slice(0, 10);
 
-    // Tasks completed in window (done && date in [startKey, today])
-    const completedTasks = state.tasks.filter(t => t.done && t.date && t.date >= startKey && t.date <= today);
-    // Tasks pending in window (not done && date in [startKey, today])
-    const pendingTasks = state.tasks.filter(t => !t.done && t.date && t.date >= startKey && t.date <= today);
-
-    // Habit logs in range
+    // === Three structured log sources (all survive daily cleanup) ===
+    const taskLogs = getTaskLogs().filter(l => l.date >= startKey && l.date <= today);
     const habitLogs = getHabitLogs().filter(l => l.date >= startKey && l.date <= today);
+    const shopHistory = getShopHistory().filter(h => h.date >= startKey && h.date <= today);
     const habits = getHabits();
 
-    // Drops earned in range
-    const dropsHistory = (state.drops && state.drops.history || []).filter(h => h.date >= startKey && h.date <= today && h.amount > 0);
-    const dropsEarned = dropsHistory.reduce((s, h) => s + h.amount, 0);
+    // Pending tasks still in state
+    const pendingTasks = state.tasks.filter(t => !t.done && t.date && t.date >= startKey && t.date <= today);
+
+    // Drops summary
+    const allDropsInRange = (state.drops && state.drops.history || []).filter(h => h.date >= startKey && h.date <= today);
+    const dropsEarned = allDropsInRange.filter(h => h.amount > 0).reduce((s, h) => s + h.amount, 0);
+    const dropsSpent = allDropsInRange.filter(h => h.amount < 0).reduce((s, h) => s + Math.abs(h.amount), 0);
 
     // Build text data
     let ctx = `总结范围: ${startKey} 至 ${today} (${days} 天)\n\n`;
+
+    // --- Task completion (from taskLogs, fallback to drops.history for older data) ---
     ctx += `【任务完成情况】\n`;
-    ctx += `已完成: ${completedTasks.length} 个任务\n`;
-    if (completedTasks.length > 0) {
-      completedTasks.forEach(t => {
-        ctx += `  - ${t.name} (${PRIORITY_LABELS[t.quadrant] || '一般'}, ${t.duration}分钟, ${t.date})\n`;
+    if (taskLogs.length > 0) {
+      ctx += `完成任务数: ${taskLogs.length} 个\n`;
+      taskLogs.forEach(l => {
+        ctx += `  - ${l.name} (${PRIORITY_LABELS[l.quadrant] || '一般'}, 预估${l.duration}分钟, +${l.dropsEarned}水滴, ${l.date})\n`;
+      });
+    } else {
+      // Fallback: use drops.history for data before taskLogs existed
+      const taskDrops = allDropsInRange.filter(h => h.amount > 0 && h.reason && h.reason.startsWith('完成任务:'));
+      ctx += `完成任务数: ${taskDrops.length} 个\n`;
+      taskDrops.forEach(h => {
+        ctx += `  - ${h.reason.replace('完成任务: ', '')} (+${h.amount}水滴, ${h.date})\n`;
       });
     }
     ctx += `待完成: ${pendingTasks.length} 个\n`;
@@ -1422,6 +1510,7 @@
       });
     }
 
+    // --- Habit logs ---
     ctx += `\n【习惯打卡情况】\n`;
     if (habitLogs.length === 0) {
       ctx += `该时段无打卡记录\n`;
@@ -1441,8 +1530,28 @@
       });
     }
 
+    // --- Shop consumption ---
+    ctx += `\n【消费商城情况】\n`;
+    if (shopHistory.length === 0) {
+      ctx += `该时段无消费记录\n`;
+    } else {
+      ctx += `消费次数: ${shopHistory.length} 次\n`;
+      const shopSummary = {};
+      shopHistory.forEach(h => {
+        if (!shopSummary[h.name]) shopSummary[h.name] = { count: 0, totalSpent: 0, icon: h.icon };
+        shopSummary[h.name].count++;
+        shopSummary[h.name].totalSpent += h.price || 0;
+      });
+      Object.keys(shopSummary).forEach(name => {
+        const s = shopSummary[name];
+        ctx += `  - ${s.icon || '🎁'} ${name}: ${s.count} 次, 共消费 ${s.totalSpent} 水滴\n`;
+      });
+    }
+
+    // --- Drops overview ---
     ctx += `\n【水滴收支】\n`;
     ctx += `期间获得水滴: ${dropsEarned} 滴\n`;
+    ctx += `期间消费水滴: ${dropsSpent} 滴\n`;
     ctx += `当前水滴余额: ${(state.drops && state.drops.total) || 0} 滴\n`;
 
     return ctx;
@@ -1455,29 +1564,52 @@
     startDate.setDate(startDate.getDate() - (days - 1));
     const startKey = startDate.toISOString().slice(0, 10);
 
-    const completedTasks = state.tasks.filter(t => t.done && t.date && t.date >= startKey && t.date <= today);
-    const pendingTasks = state.tasks.filter(t => !t.done && t.date && t.date >= startKey && t.date <= today);
+    // Three structured log sources
+    const taskLogs = getTaskLogs().filter(l => l.date >= startKey && l.date <= today);
     const habitLogs = getHabitLogs().filter(l => l.date >= startKey && l.date <= today);
+    const shopHist = getShopHistory().filter(h => h.date >= startKey && h.date <= today);
     const habits = getHabits();
-    const dropsHistory = (state.drops && state.drops.history || []).filter(h => h.date >= startKey && h.date <= today && h.amount > 0);
-    const dropsEarned = dropsHistory.reduce((s, h) => s + h.amount, 0);
+    const pendingTasks = state.tasks.filter(t => !t.done && t.date && t.date >= startKey && t.date <= today);
+
+    // Drops
+    const allDropsInRange = (state.drops && state.drops.history || []).filter(h => h.date >= startKey && h.date <= today);
+    const dropsEarned = allDropsInRange.filter(h => h.amount > 0).reduce((s, h) => s + h.amount, 0);
+    const dropsSpent = allDropsInRange.filter(h => h.amount < 0).reduce((s, h) => s + Math.abs(h.amount), 0);
+
+    // Determine task completion count (taskLogs preferred, fallback to drops)
+    let taskCount = taskLogs.length;
+    if (taskCount === 0) {
+      taskCount = allDropsInRange.filter(h => h.amount > 0 && h.reason && h.reason.startsWith('完成任务:')).length;
+    }
 
     let html = '';
-    // Data section
+    // Data overview
     html += `<div class="summary-section"><h4>📊 数据概览 (${startKey} ~ ${today})</h4><ul>`;
-    html += `<li>完成任务: <strong>${completedTasks.length}</strong> 个</li>`;
+    html += `<li>完成任务: <strong>${taskCount}</strong> 个</li>`;
     html += `<li>待完成任务: <strong>${pendingTasks.length}</strong> 个</li>`;
     html += `<li>习惯打卡: <strong>${habitLogs.length}</strong> 次</li>`;
+    html += `<li>消费兑换: <strong>${shopHist.length}</strong> 次</li>`;
     html += `<li>获得水滴: <strong style="color:var(--cyan)">${dropsEarned}</strong> 滴</li>`;
+    html += `<li>消费水滴: <strong style="color:var(--text-muted)">${dropsSpent}</strong> 滴</li>`;
     html += `</ul></div>`;
 
     // Completed tasks
-    if (completedTasks.length > 0) {
+    if (taskLogs.length > 0) {
       html += `<div class="summary-section"><h4>✅ 已完成任务</h4><ul>`;
-      completedTasks.forEach(t => {
-        html += `<li>${esc(t.name)} <span style="color:var(--text-muted)">(${PRIORITY_LABELS[t.quadrant] || '一般'}, ${t.date})</span></li>`;
+      taskLogs.forEach(l => {
+        html += `<li>${esc(l.name)} <span style="color:var(--text-muted)">(${PRIORITY_LABELS[l.quadrant] || '一般'}, ${l.duration}分钟, +${l.dropsEarned}💧, ${l.date})</span></li>`;
       });
       html += `</ul></div>`;
+    } else {
+      // Fallback for older data without taskLogs
+      const taskDrops = allDropsInRange.filter(h => h.amount > 0 && h.reason && h.reason.startsWith('完成任务:'));
+      if (taskDrops.length > 0) {
+        html += `<div class="summary-section"><h4>✅ 已完成任务</h4><ul>`;
+        taskDrops.forEach(h => {
+          html += `<li>${esc(h.reason.replace('完成任务: ', ''))} <span style="color:var(--text-muted)">(+${h.amount}💧, ${h.date})</span></li>`;
+        });
+        html += `</ul></div>`;
+      }
     }
 
     // Pending tasks
@@ -1507,11 +1639,42 @@
       html += `</ul></div>`;
     }
 
+    // Shop consumption
+    if (shopHist.length > 0) {
+      html += `<div class="summary-section"><h4>🛒 消费兑换</h4><ul>`;
+      const shopMap = {};
+      shopHist.forEach(h => {
+        if (!shopMap[h.name]) shopMap[h.name] = { count: 0, total: 0, icon: h.icon };
+        shopMap[h.name].count++;
+        shopMap[h.name].total += h.price || 0;
+      });
+      Object.keys(shopMap).forEach(name => {
+        const s = shopMap[name];
+        html += `<li>${s.icon || '🎁'} ${esc(name)}: ${s.count} 次, 共 ${s.total} 💧</li>`;
+      });
+      html += `</ul></div>`;
+    }
+
     return html;
   }
 
+  // Toggle custom days input visibility
+  document.getElementById('summary-range').addEventListener('change', function() {
+    const customInput = document.getElementById('summary-range-custom');
+    customInput.style.display = this.value === 'custom' ? '' : 'none';
+  });
+
+  function getSummaryDays() {
+    const sel = document.getElementById('summary-range');
+    if (sel.value === 'custom') {
+      const v = parseInt(document.getElementById('summary-range-custom').value) || 7;
+      return Math.max(1, Math.min(90, v));
+    }
+    return parseInt(sel.value) || 7;
+  }
+
   document.getElementById('btn-generate-summary').addEventListener('click', async () => {
-    const days = parseInt(document.getElementById('summary-range').value) || 7;
+    const days = getSummaryDays();
     const btn = document.getElementById('btn-generate-summary');
     const loading = document.getElementById('summary-loading');
     const resultDiv = document.getElementById('summary-result');
@@ -1550,17 +1713,17 @@
   });
 
   document.getElementById('btn-download-summary').addEventListener('click', () => {
-    const days = document.getElementById('summary-range').value || 7;
+    const days = getSummaryDays();
     const today = todayKey();
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - parseInt(days));
+    startDate.setDate(startDate.getDate() - (days - 1));
     const startKey = startDate.toISOString().slice(0, 10);
 
     let text = `心流 · 近期总结报告\n`;
     text += `=========================\n`;
     text += `报告范围: ${startKey} ~ ${today}\n`;
     text += `生成时间: ${new Date().toLocaleString('zh-CN')}\n\n`;
-    text += buildSummaryContext(parseInt(days));
+    text += buildSummaryContext(days);
     if (lastSummaryText) {
       text += `\n【AI 洞察与建议】\n${lastSummaryText}\n`;
     }
@@ -2139,6 +2302,21 @@
     renderHabits();
   });
 
+  // Habit emoji regeneration button
+  document.getElementById('btn-habit-regen-emoji').addEventListener('click', async () => {
+    const name = document.getElementById('habit-edit-name').value.trim();
+    if (!name) { alert('请先输入习惯名称'); return; }
+    const cfg = getApiConfig();
+    if (!cfg.key) { alert('请先在设置中配置 API Key'); return; }
+    const btn = document.getElementById('btn-habit-regen-emoji');
+    btn.disabled = true;
+    btn.textContent = '生成中...';
+    const emoji = await generateEmoji(name) || '🔄';
+    document.getElementById('habit-edit-icon').value = emoji;
+    btn.disabled = false;
+    btn.textContent = '重新生成';
+  });
+
   document.getElementById('btn-habit-delete').addEventListener('click', () => {
     if (!editingHabitId) return;
     if (confirm('删除此习惯？相关记录将保留。')) {
@@ -2213,15 +2391,8 @@
   });
 
   // ===== SHOP (消费商城) =====
-  const DEFAULT_SHOP_ITEMS = [
-    { id: 'shop-1', name: '娱乐型放松/h', icon: '🎮', price: 20, stock: -1 },
-    { id: 'shop-2', name: '成长型放松/h', icon: '📚', price: 10, stock: -1 },
-    { id: 'shop-3', name: '聊天水群/h', icon: '💬', price: 5, stock: -1 },
-    { id: 'shop-4', name: '约会/次', icon: '💕', price: 30, stock: -1 },
-  ];
-
   function getShopItems() {
-    if (!state.shopItems) state.shopItems = JSON.parse(JSON.stringify(DEFAULT_SHOP_ITEMS));
+    if (!state.shopItems) state.shopItems = [];
     return state.shopItems;
   }
 
@@ -2293,7 +2464,7 @@
       const el = document.createElement('div');
       el.className = 'shop-item';
       el.innerHTML = `
-        <button class="shop-item-delete" title="删除商品">&times;</button>
+        <button class="shop-item-edit" title="编辑商品" style="position:absolute;top:8px;right:8px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:.85rem;padding:2px 6px;border-radius:4px;transition:color .2s">✏️</button>
         <div class="shop-item-icon">${item.icon || '🎁'}</div>
         <div class="shop-item-name">${esc(item.name)}</div>
         <div class="shop-item-price">💧 ${item.price} 水滴</div>
@@ -2301,9 +2472,7 @@
         <button class="btn-shop-buy${soldOut ? ' sold-out' : ''}" ${!canBuy ? 'disabled' : ''}>${soldOut ? '已售罄' : '兑换'}</button>
       `;
       el.querySelector('.btn-shop-buy').addEventListener('click', () => buyShopItem(item.id));
-      el.querySelector('.shop-item-delete').addEventListener('click', () => {
-        if (confirm('删除商品「' + item.name + '」？')) deleteShopItem(item.id);
-      });
+      el.querySelector('.shop-item-edit').addEventListener('click', () => openShopEditModal(item.id));
       grid.appendChild(el);
     });
 
@@ -2356,72 +2525,86 @@
     showShopToast('商品已添加！', 'success');
   });
 
+  // ===== SHOP EDIT MODAL =====
+  let editingShopItemId = null;
+  const shopEditOverlay = document.getElementById('shop-edit-overlay');
+
+  function openShopEditModal(id) {
+    editingShopItemId = id;
+    const item = getShopItems().find(i => i.id === id);
+    if (!item) return;
+    document.getElementById('shop-edit-title').textContent = '编辑商品';
+    document.getElementById('shop-edit-name').value = item.name;
+    document.getElementById('shop-edit-price').value = item.price;
+    document.getElementById('shop-edit-icon').value = item.icon || '';
+    shopEditOverlay.classList.remove('hidden');
+  }
+
+  document.getElementById('shop-edit-close').addEventListener('click', () => shopEditOverlay.classList.add('hidden'));
+  shopEditOverlay.addEventListener('click', (e) => { if (e.target === shopEditOverlay) shopEditOverlay.classList.add('hidden'); });
+
+  document.getElementById('btn-shop-edit-regen-emoji').addEventListener('click', async () => {
+    const name = document.getElementById('shop-edit-name').value.trim();
+    if (!name) { alert('请先输入商品名称'); return; }
+    const cfg = getApiConfig();
+    if (!cfg.key) { alert('请先在设置中配置 API Key'); return; }
+    const btn = document.getElementById('btn-shop-edit-regen-emoji');
+    btn.disabled = true;
+    btn.textContent = '生成中...';
+    const emoji = await generateEmoji(name) || '🎁';
+    document.getElementById('shop-edit-icon').value = emoji;
+    btn.disabled = false;
+    btn.textContent = '重新生成';
+  });
+
+  document.getElementById('btn-shop-edit-save').addEventListener('click', async () => {
+    if (!editingShopItemId) return;
+    const name = document.getElementById('shop-edit-name').value.trim();
+    if (!name) { showShopToast('请输入商品名称', 'error'); return; }
+    const price = parseInt(document.getElementById('shop-edit-price').value);
+    if (!price || price <= 0) { showShopToast('请输入有效价格', 'error'); return; }
+    let icon = document.getElementById('shop-edit-icon').value.trim();
+    if (!icon) {
+      const cfg = getApiConfig();
+      if (cfg.key) {
+        const btnSave = document.getElementById('btn-shop-edit-save');
+        btnSave.disabled = true;
+        btnSave.textContent = '生成图标...';
+        icon = await generateEmoji(name) || '🎁';
+        btnSave.disabled = false;
+        btnSave.textContent = '保存';
+      } else {
+        icon = '🎁';
+      }
+    }
+    const items = getShopItems();
+    const item = items.find(i => i.id === editingShopItemId);
+    if (item) {
+      item.name = name;
+      item.price = price;
+      item.icon = icon;
+    }
+    saveState();
+    shopEditOverlay.classList.add('hidden');
+    renderShop();
+    showShopToast('商品已更新！', 'success');
+  });
+
+  document.getElementById('btn-shop-edit-delete').addEventListener('click', () => {
+    if (!editingShopItemId) return;
+    const item = getShopItems().find(i => i.id === editingShopItemId);
+    if (item && confirm('删除商品「' + item.name + '」？')) {
+      deleteShopItem(editingShopItemId);
+      shopEditOverlay.classList.add('hidden');
+    }
+  });
+
   // ===== INIT =====
   // Global touch event listeners for mobile drag
   document.addEventListener('touchmove', handleTouchMove, { passive: false });
   document.addEventListener('touchend', handleTouchEnd);
 
-  // ===== DEMO DATA INJECTION =====
-  // Inject demo data if state is empty (for demonstration purposes)
-  function injectDemoData() {
-    if (localStorage.getItem('xinliu_demo_injected') === '1') return;
-    if (state.tasks.length > 0 || (state.habits && state.habits.length > 0)) return; // already has data
-    const today = todayKey();
-    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowKey = tomorrow.toISOString().slice(0, 10);
-    const day3 = new Date(); day3.setDate(day3.getDate() + 2);
-    const day3Key = day3.toISOString().slice(0, 10);
-    const day4 = new Date(); day4.setDate(day4.getDate() + 3);
-    const day4Key = day4.toISOString().slice(0, 10);
-
-    // Demo tasks for board & gantt
-    state.tasks = [
-      { id: 'demo-1', name: '完成项目方案PPT', quadrant: 'urgent-important', tags: [], date: today, time: '09:00', duration: 120, note: '客户下午要看', recurrence: 'none', subtasks: [{name:'整理数据',done:true},{name:'制作图表',done:false}], done: false, sortOrder: 0, createdAt: new Date().toISOString() },
-      { id: 'demo-2', name: '回复重要邮件', quadrant: 'urgent-important', tags: [], date: today, time: '10:30', duration: 30, note: '', recurrence: 'none', subtasks: [], done: false, sortOrder: 1, createdAt: new Date().toISOString() },
-      { id: 'demo-3', name: '阅读《深度工作》第5章', quadrant: 'important', tags: [], date: today, time: '', duration: 45, note: '每天坚持一点', recurrence: 'none', subtasks: [], done: false, sortOrder: 2, createdAt: new Date().toISOString() },
-      { id: 'demo-4', name: '整理本周工作总结', quadrant: 'important', tags: [], date: tomorrowKey, time: '', duration: 60, note: '', recurrence: 'none', subtasks: [], done: false, sortOrder: 3, createdAt: new Date().toISOString() },
-      { id: 'demo-5', name: '约牙医检查', quadrant: 'urgent', tags: [], date: day3Key, time: '14:00', duration: 60, note: '记得带医保卡', recurrence: 'none', subtasks: [], done: false, sortOrder: 4, createdAt: new Date().toISOString() },
-      { id: 'demo-6', name: '学习TypeScript泛型', quadrant: 'important', tags: [], date: day4Key, time: '', duration: 90, note: '', recurrence: 'none', subtasks: [{name:'看文档',done:false},{name:'写练习',done:false}], done: false, sortOrder: 5, createdAt: new Date().toISOString() },
-      { id: 'demo-7', name: '整理房间', quadrant: 'neither', tags: [], date: tomorrowKey, time: '', duration: 40, note: '', recurrence: 'weekly', subtasks: [], done: false, sortOrder: 6, createdAt: new Date().toISOString() },
-      { id: 'demo-8', name: '晨间冥想', quadrant: 'important', tags: [], date: today, time: '07:00', duration: 15, note: '', recurrence: 'daily', subtasks: [], done: true, sortOrder: 7, createdAt: new Date().toISOString() },
-    ];
-
-    // Demo drops
-    state.drops = { total: 68, history: [
-      { date: today, amount: 8, reason: '完成任务: 完成项目方案PPT' },
-      { date: today, amount: 2, reason: '完成任务: 晨间冥想' },
-      { date: today, amount: 4, reason: '习惯打卡: 阅读' },
-      { date: today, amount: 6, reason: '习惯打卡: 运动' },
-      { date: today, amount: 3, reason: '习惯打卡: 冥想' },
-    ]};
-
-    // Demo habits
-    state.habits = [
-      { id: 'habit-demo-1', name: '阅读', type: 'duration', icon: '📖', dropsPerUnit: 4, createdAt: new Date().toISOString() },
-      { id: 'habit-demo-2', name: '运动健身', type: 'duration', icon: '🏃', dropsPerUnit: 6, createdAt: new Date().toISOString() },
-      { id: 'habit-demo-3', name: '冥想', type: 'duration', icon: '🧘', dropsPerUnit: 3, createdAt: new Date().toISOString() },
-      { id: 'habit-demo-4', name: '背单词', type: 'count', icon: '🇬🇧', dropsPerUnit: 1, createdAt: new Date().toISOString() },
-      { id: 'habit-demo-5', name: '写日记', type: 'count', icon: '✍️', dropsPerUnit: 3, createdAt: new Date().toISOString() },
-    ];
-
-    // Demo habit logs
-    state.habitLogs = [
-      { id: 'hlog-d1', habitId: 'habit-demo-1', date: today, value: 1, dropsEarned: 4 },
-      { id: 'hlog-d2', habitId: 'habit-demo-2', date: today, value: 0.75, dropsEarned: 4 },
-      { id: 'hlog-d3', habitId: 'habit-demo-3', date: today, value: 0.5, dropsEarned: 1 },
-    ];
-
-    // Demo shop history
-    state.shopHistory = [
-      { date: today, name: '聊天水群/h', icon: '💬', price: 5 },
-    ];
-
-    saveState();
-    localStorage.setItem('xinliu_demo_injected', '1');
-  }
-
   // 先用本地数据渲染（避免白屏），然后异步加载服务端数据覆盖
-  injectDemoData();
   loadSettingsUI();
   renderDashboard();
   renderBoard();

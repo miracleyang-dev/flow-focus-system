@@ -86,7 +86,7 @@
   <section id="view-dashboard" class="view active">
     <div class="dash-greeting">
       <h1 id="dash-greeting-text">早上好</h1>
-      <p class="dash-date" id="dash-date"></p>
+      <p class="dash-date" id="dash-date"></p><button id="btn-manual-refresh" class="btn-manual-refresh" title="手动刷新每日数据"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
     </div>
     <div class="dash-quote" id="dash-quote"></div>
     <div class="dash-stats-grid">
@@ -174,18 +174,19 @@
       <p class="view-desc">自动回顾近期任务与习惯数据，AI 帮你生成总结报告。</p>
     </div>
     <div class="summary-controls">
-      <div class="summary-range-row">
-        <label>总结范围</label>
-        <select id="summary-range">
-          <option value="1">最近 1 天</option>
-          <option value="3" selected>最近 3 天</option>
-          <option value="7">最近 7 天</option>
+      <div class="summary-action-row">
+        <button id="btn-generate-summary" class="btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 22l-.75-12.07A4.001 4.001 0 0 1 12 2z"/></svg>
+          AI 生成总结
+        </button>
+        <select id="summary-range" title="总结范围">
+          <option value="1">1 天</option>
+          <option value="3" selected>3 天</option>
+          <option value="7">7 天</option>
+          <option value="custom">自定义</option>
         </select>
+        <input type="number" id="summary-range-custom" min="1" max="90" value="14" placeholder="1-90" style="display:none;width:60px">
       </div>
-      <button id="btn-generate-summary" class="btn-primary">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 22l-.75-12.07A4.001 4.001 0 0 1 12 2z"/></svg>
-        AI 生成总结
-      </button>
       <div id="summary-loading" class="ai-loading hidden">
         <div class="loading-spinner"></div>
         <span>AI 正在生成总结报告...</span>
@@ -243,9 +244,10 @@
         <div class="form-row">
           <label>图标 (emoji)</label>
           <input type="text" id="habit-edit-icon" placeholder="📖" maxlength="10" style="width:60px;text-align:center">
+          <button id="btn-habit-regen-emoji" class="btn-secondary" style="margin-left:8px;font-size:.78rem;padding:4px 10px">重新生成</button>
         </div>
         <div class="form-row">
-          <label>每次获得水滴数</label>
+          <label>获得水滴数</label>
           <input type="number" id="habit-edit-drops" min="1" value="2" placeholder="如完成一次/一小时获得多少水滴">
         </div>
         <div class="form-row">
@@ -304,6 +306,35 @@
       <div id="shop-history" class="shop-history"></div>
     </div>
   </section>
+
+  <!-- SHOP EDIT MODAL -->
+  <div id="shop-edit-overlay" class="modal-overlay hidden">
+    <div class="modal" style="max-width:400px">
+      <div class="modal-header">
+        <h2 id="shop-edit-title">编辑商品</h2>
+        <button class="modal-close" id="shop-edit-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <label>商品名称</label>
+          <input type="text" id="shop-edit-name" placeholder="商品名称">
+        </div>
+        <div class="form-row">
+          <label>价格 (水滴)</label>
+          <input type="number" id="shop-edit-price" min="1" placeholder="价格">
+        </div>
+        <div class="form-row">
+          <label>图标 (emoji)</label>
+          <input type="text" id="shop-edit-icon" placeholder="🎁" maxlength="10" style="width:60px;text-align:center">
+          <button id="btn-shop-edit-regen-emoji" class="btn-secondary" style="margin-left:8px;font-size:.78rem;padding:4px 10px">重新生成</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-shop-edit-delete" class="btn-danger">删除</button>
+        <button id="btn-shop-edit-save" class="btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
 
   <!-- VIEW: SETTINGS -->
   <section id="view-settings" class="view">

@@ -189,11 +189,14 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 
 /* ===== SUMMARY VIEW ===== */
 .summary-controls{max-width:700px;margin-bottom:1.5rem}
-.summary-range-row{display:flex;align-items:center;gap:.8rem;margin-bottom:1rem}
-.summary-range-row label{font-size:.9rem;color:var(--text-dim);white-space:nowrap}
-.summary-range-row select{
+.summary-action-row{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.summary-action-row select{
   background:var(--bg-input);color:var(--text);border:1px solid rgba(255,255,255,.1);
-  padding:.45rem .8rem;border-radius:var(--radius-sm);font-size:.88rem;
+  padding:.45rem .6rem;border-radius:var(--radius-sm);font-size:.82rem;
+}
+.summary-action-row input[type="number"]{
+  background:var(--bg-input);color:var(--text);border:1px solid rgba(255,255,255,.1);
+  padding:.45rem .5rem;border-radius:var(--radius-sm);font-size:.82rem;
 }
 .summary-result{max-width:700px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius);padding:1.2rem;margin-top:1rem}
 .summary-result-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;padding-bottom:.6rem;border-bottom:1px solid var(--border-subtle)}
@@ -563,6 +566,14 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 }
 @media(max-width:380px){
 }
+
+/* Manual refresh button (inline with date) */
+.dash-date{display:inline}
+.btn-manual-refresh{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;margin-left:6px;vertical-align:middle;color:var(--text-muted);background:none;border:1px solid transparent;border-radius:6px;cursor:pointer;transition:all .2s;opacity:.6}
+.btn-manual-refresh:hover{color:var(--accent);opacity:1;border-color:var(--border)}
+.btn-manual-refresh:active{transform:scale(.9)}
+.btn-manual-refresh.refreshing svg{animation:spin .8s linear infinite}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 
 /* PWA standalone safe area */
 @media(display-mode: standalone){
