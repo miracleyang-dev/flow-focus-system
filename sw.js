@@ -1,5 +1,5 @@
 // ===== 心流 PWA Service Worker =====
-const CACHE_NAME = 'xinliu-v8';
+const CACHE_NAME = 'xinliu-v9';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

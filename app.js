@@ -30,7 +30,6 @@
       quotes: [],
       userInfo: { name: '' },
       drops: { total: 0, history: [] },
-      savedChats: [],
       lastDailyCheck: '',
       lastModified: 0,
     };
@@ -45,7 +44,6 @@
     if (!Array.isArray(merged.quotes)) merged.quotes = def.quotes;
     if (!merged.userInfo) merged.userInfo = def.userInfo;
     if (!merged.drops) merged.drops = def.drops;
-    if (!Array.isArray(merged.savedChats)) merged.savedChats = def.savedChats;
     if (!merged.lastDailyCheck) merged.lastDailyCheck = '';
     if (!Array.isArray(merged.shopItems)) merged.shopItems = null; // will be initialized with defaults on first access
     if (!Array.isArray(merged.shopHistory)) merged.shopHistory = [];
@@ -329,7 +327,7 @@
   const menuToggle = document.getElementById('menu-toggle');
   const mobileTitle = document.getElementById('mobile-title');
 
-  const viewTitles = { dashboard: '仪表盘', dump: '倒空大脑', board: '任务看板', gantt: '甘特图', chat: 'AI 陪伴', habits: '长期习惯', shop: '消费商城', settings: '设置' };
+  const viewTitles = { dashboard: '仪表盘', dump: '倒空大脑', board: '任务看板', gantt: '甘特图', summary: '近期总结', habits: '长期习惯', shop: '消费商城', settings: '设置' };
 
   function switchView(name) {
     navItems.forEach(n => n.classList.toggle('active', n.dataset.view === name));
@@ -506,6 +504,28 @@
     }
     const data = await res.json();
     return data.choices[0].message.content;
+  }
+
+  // ===== AUTO EMOJI GENERATION =====
+  async function generateEmoji(name) {
+    const cfg = getApiConfig();
+    if (!cfg.key || !name) return '';
+    try {
+      const reply = await callLLM(
+        '你是一个emoji选择器。用户给你一个名称，你返回一个最匹配的emoji。只返回一个emoji，不要返回任何其他文字。',
+        name
+      );
+      // Extract the first emoji from reply
+      const segments = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(reply.trim())];
+      if (segments.length > 0) {
+        const first = segments[0].segment;
+        // Verify it looks like an emoji (non-ASCII, not a regular letter/number)
+        if (/\p{Emoji_Presentation}|\p{Extended_Pictographic}/u.test(first)) return first;
+      }
+      return '';
+    } catch (e) {
+      return '';
+    }
   }
 
   // ===== TASK HELPERS =====
@@ -1013,7 +1033,36 @@
     }
   }
 
-  function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  // ===== EMOJI INPUT FIX =====
+  // Prevent maxlength from clipping multi-codepoint emoji during IME composition
+  function setupEmojiInput(input) {
+    let composing = false;
+    input.addEventListener('compositionstart', () => { composing = true; });
+    input.addEventListener('compositionend', () => {
+      composing = false;
+      // Extract only the first emoji grapheme cluster after composition ends
+      const segments = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(input.value)];
+      if (segments.length > 0) {
+        input.value = segments[0].segment;
+      }
+    });
+    input.addEventListener('input', () => {
+      if (composing) return;
+      // Ensure only one grapheme cluster (one visual emoji) is kept
+      try {
+        const segments = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(input.value)];
+        if (segments.length > 1) {
+          input.value = segments[segments.length - 1].segment;
+        }
+      } catch(e) {
+        // Fallback: keep value as-is if Intl.Segmenter not supported
+      }
+    });
+  }
+  // Apply to all emoji input fields
+  document.querySelectorAll('#habit-edit-icon, #shop-new-icon').forEach(setupEmojiInput);
 
   // ===== EDIT MODAL =====
   const modalOverlay = document.getElementById('modal-overlay');
@@ -1334,257 +1383,197 @@
     container.innerHTML = html;
   }
 
-  // ===== AI CHAT VIEW =====
-  const chatMessages = document.getElementById('chat-messages');
-  const chatInput = document.getElementById('chat-input');
-  const btnChatSend = document.getElementById('btn-chat-send');
-  let chatHistory = [];
+  // ===== SUMMARY VIEW (近期总结) =====
+  let lastSummaryText = '';
 
-  function buildTaskContext() {
+  function buildSummaryContext(days) {
     const today = todayKey();
     const now = new Date();
-    const weekday = ['周日','周一','周二','周三','周四','周五','周六'][now.getDay()];
-    const undone = state.tasks.filter(t => !t.done);
-    const done = state.tasks.filter(t => t.done);
-    const overdue = undone.filter(t => t.date && t.date < today);
-    const todayTasks = undone.filter(t => t.date === today);
+    const startDate = new Date(now);
+    startDate.setDate(startDate.getDate() - (days - 1));
+    const startKey = startDate.toISOString().slice(0, 10);
 
-    let ctx = `当前日期: ${today}（${weekday}），当前时间: ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}\n`;
-    ctx += `任务概况: 共 ${state.tasks.length} 个任务，未完成 ${undone.length} 个，已完成 ${done.length} 个\n`;
-    ctx += `专注水滴: ${(state.drops && state.drops.total) || 0} 滴\n`;
-    if (overdue.length > 0) ctx += `逾期任务 (${overdue.length}个): ${overdue.map(t => t.name).join('、')}\n`;
-    if (todayTasks.length > 0) ctx += `今日待办 (${todayTasks.length}个): ${todayTasks.map(t => `${t.name}${t.time ? '('+t.time+')' : ''} [${PRIORITY_LABELS[t.quadrant]||'一般'}]`).join('、')}\n`;
-    ctx += '\n完整任务列表:\n';
-    undone.forEach(t => {
-      const dl = deadlineStatus(t.date);
-      const dlLabel = dl === 'overdue' ? '[已逾期!]' : dl === 'today' ? '[今天截止]' : dl === 'tomorrow' ? '[明天截止]' : '';
-      const tagNames = getTaskTagNames(t).join(',') || '无标签';
-      const sub = (t.subtasks && t.subtasks.length > 0) ? ` (子任务: ${t.subtasks.filter(s=>s.done).length}/${t.subtasks.length} 完成)` : '';
-      const rec = t.recurrence && t.recurrence !== 'none' ? ` [${t.recurrence === 'daily' ? '每天' : '每周'}循环]` : '';
-      ctx += `- ${t.name} | ${PRIORITY_LABELS[t.quadrant]||'一般'} | ${tagNames} | 截止:${t.date||'无'}${t.time?' '+t.time:''} | ${t.duration}分钟${sub}${rec} ${dlLabel}\n`;
-    });
+    // Tasks completed in window (done && date in [startKey, today])
+    const completedTasks = state.tasks.filter(t => t.done && t.date && t.date >= startKey && t.date <= today);
+    // Tasks pending in window (not done && date in [startKey, today])
+    const pendingTasks = state.tasks.filter(t => !t.done && t.date && t.date >= startKey && t.date <= today);
+
+    // Habit logs in range
+    const habitLogs = getHabitLogs().filter(l => l.date >= startKey && l.date <= today);
+    const habits = getHabits();
+
+    // Drops earned in range
+    const dropsHistory = (state.drops && state.drops.history || []).filter(h => h.date >= startKey && h.date <= today && h.amount > 0);
+    const dropsEarned = dropsHistory.reduce((s, h) => s + h.amount, 0);
+
+    // Build text data
+    let ctx = `总结范围: ${startKey} 至 ${today} (${days} 天)\n\n`;
+    ctx += `【任务完成情况】\n`;
+    ctx += `已完成: ${completedTasks.length} 个任务\n`;
+    if (completedTasks.length > 0) {
+      completedTasks.forEach(t => {
+        ctx += `  - ${t.name} (${PRIORITY_LABELS[t.quadrant] || '一般'}, ${t.duration}分钟, ${t.date})\n`;
+      });
+    }
+    ctx += `待完成: ${pendingTasks.length} 个\n`;
+    if (pendingTasks.length > 0) {
+      pendingTasks.forEach(t => {
+        ctx += `  - ${t.name} (${PRIORITY_LABELS[t.quadrant] || '一般'}, 截止: ${t.date})\n`;
+      });
+    }
+
+    ctx += `\n【习惯打卡情况】\n`;
+    if (habitLogs.length === 0) {
+      ctx += `该时段无打卡记录\n`;
+    } else {
+      const habitSummary = {};
+      habitLogs.forEach(l => {
+        if (!habitSummary[l.habitId]) habitSummary[l.habitId] = { count: 0, totalVal: 0, totalDrops: 0 };
+        habitSummary[l.habitId].count++;
+        habitSummary[l.habitId].totalVal += l.value || 0;
+        habitSummary[l.habitId].totalDrops += l.dropsEarned || 0;
+      });
+      Object.keys(habitSummary).forEach(hid => {
+        const habit = habits.find(h => h.id === hid);
+        const s = habitSummary[hid];
+        const unit = (habit && habit.type === 'duration') ? 'h' : '次';
+        ctx += `  - ${habit ? habit.icon + ' ' + habit.name : '已删除习惯'}: 打卡 ${s.count} 次, 累计 ${s.totalVal} ${unit}, 获得 ${s.totalDrops} 水滴\n`;
+      });
+    }
+
+    ctx += `\n【水滴收支】\n`;
+    ctx += `期间获得水滴: ${dropsEarned} 滴\n`;
+    ctx += `当前水滴余额: ${(state.drops && state.drops.total) || 0} 滴\n`;
+
     return ctx;
   }
 
-  function getChatSystemPrompt() {
-    const taskCtx = buildTaskContext();
-    const userName = (state.userInfo && state.userInfo.name) || '朋友';
-    return `你是"心流"效率系统的 AI 陪伴助手。你温暖、真诚、有同理心，同时也务实。
-用户的名字是"${userName}"。
+  function buildSummaryTemplate(days) {
+    const today = todayKey();
+    const now = new Date();
+    const startDate = new Date(now);
+    startDate.setDate(startDate.getDate() - (days - 1));
+    const startKey = startDate.toISOString().slice(0, 10);
 
-你的角色：
-1. **情绪支持**：当用户说"不想干活"、"好累"、"焦虑"时，先共情，再温和地帮他找到一个最小的启动步骤
-2. **任务分析**：你可以看到用户的所有任务数据，帮他分析优先级、发现问题
-3. **行动规划**：帮用户制定当下可执行的具体计划
-4. **拖延克服**：用2分钟法则等技巧帮用户启动
-5. **适时鼓励**：看到已完成的任务或专注记录时，给予具体的肯定
-6. **人文关怀**：关注用户的身心状态，适时提醒休息、喝水、活动身体；当感受到用户压力大或情绪低落时，给予温暖的陪伴和理解，不急于给出建议；偶尔分享一些生活智慧或温暖的话语，让用户感受到被关心
+    const completedTasks = state.tasks.filter(t => t.done && t.date && t.date >= startKey && t.date <= today);
+    const pendingTasks = state.tasks.filter(t => !t.done && t.date && t.date >= startKey && t.date <= today);
+    const habitLogs = getHabitLogs().filter(l => l.date >= startKey && l.date <= today);
+    const habits = getHabits();
+    const dropsHistory = (state.drops && state.drops.history || []).filter(h => h.date >= startKey && h.date <= today && h.amount > 0);
+    const dropsEarned = dropsHistory.reduce((s, h) => s + h.amount, 0);
 
-说话风格：
-- 像一个理解你的好朋友，不说教
-- 简短有力，不啰嗦（每次回复控制在 150 字以内）
-- 可以偶尔用一些轻松的语气
-- 如果用户明确在发泄情绪，先倾听，不急于给方案
-- 适时表达关心，比如提醒注意身体、注意休息
+    let html = '';
+    // Data section
+    html += `<div class="summary-section"><h4>📊 数据概览 (${startKey} ~ ${today})</h4><ul>`;
+    html += `<li>完成任务: <strong>${completedTasks.length}</strong> 个</li>`;
+    html += `<li>待完成任务: <strong>${pendingTasks.length}</strong> 个</li>`;
+    html += `<li>习惯打卡: <strong>${habitLogs.length}</strong> 次</li>`;
+    html += `<li>获得水滴: <strong style="color:var(--cyan)">${dropsEarned}</strong> 滴</li>`;
+    html += `</ul></div>`;
 
-以下是用户当前的任务数据：
-${taskCtx}`;
+    // Completed tasks
+    if (completedTasks.length > 0) {
+      html += `<div class="summary-section"><h4>✅ 已完成任务</h4><ul>`;
+      completedTasks.forEach(t => {
+        html += `<li>${esc(t.name)} <span style="color:var(--text-muted)">(${PRIORITY_LABELS[t.quadrant] || '一般'}, ${t.date})</span></li>`;
+      });
+      html += `</ul></div>`;
+    }
+
+    // Pending tasks
+    if (pendingTasks.length > 0) {
+      html += `<div class="summary-section"><h4>📋 待完成任务</h4><ul>`;
+      pendingTasks.forEach(t => {
+        html += `<li>${esc(t.name)} <span style="color:var(--text-muted)">(${PRIORITY_LABELS[t.quadrant] || '一般'}, 截止: ${t.date})</span></li>`;
+      });
+      html += `</ul></div>`;
+    }
+
+    // Habit summary
+    if (habitLogs.length > 0) {
+      html += `<div class="summary-section"><h4>🔄 习惯打卡</h4><ul>`;
+      const habitMap = {};
+      habitLogs.forEach(l => {
+        if (!habitMap[l.habitId]) habitMap[l.habitId] = { count: 0, totalVal: 0 };
+        habitMap[l.habitId].count++;
+        habitMap[l.habitId].totalVal += l.value || 0;
+      });
+      Object.keys(habitMap).forEach(hid => {
+        const habit = habits.find(h => h.id === hid);
+        const s = habitMap[hid];
+        const unit = (habit && habit.type === 'duration') ? 'h' : '次';
+        html += `<li>${habit ? habit.icon + ' ' + habit.name : '已删除'}: 打卡 ${s.count} 次, 累计 ${s.totalVal} ${unit}</li>`;
+      });
+      html += `</ul></div>`;
+    }
+
+    return html;
   }
 
-  const INITIAL_AI_MSG = '嗨，我已经看过你的任务列表了。有什么想聊的吗？不管是工作压力、拖延症，还是不知道该先做什么，都可以跟我说。';
-  let chatSelectMode = false;
-  let chatMsgIndex = 0;
+  document.getElementById('btn-generate-summary').addEventListener('click', async () => {
+    const days = parseInt(document.getElementById('summary-range').value) || 7;
+    const btn = document.getElementById('btn-generate-summary');
+    const loading = document.getElementById('summary-loading');
+    const resultDiv = document.getElementById('summary-result');
+    const contentDiv = document.getElementById('summary-content');
 
-  function appendChatMsg(role, text) {
-    const div = document.createElement('div');
-    const idx = chatMsgIndex++;
-    div.className = 'chat-msg ' + (role === 'ai' ? 'ai' : 'user');
-    div.dataset.idx = idx;
-    div.dataset.role = role;
-    div.dataset.text = text;
-    const avatar = role === 'ai' ? 'AI' : '我';
-    div.innerHTML = `<div class="chat-msg-select" data-idx="${idx}"></div><div class="chat-avatar">${avatar}</div><div class="chat-bubble">${esc(text)}</div>`;
-    // checkbox click
-    div.querySelector('.chat-msg-select').addEventListener('click', (e) => {
-      e.stopPropagation();
-      e.currentTarget.classList.toggle('checked');
-    });
-    chatMessages.appendChild(div);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-  }
+    // Always show the template data first
+    const templateHtml = buildSummaryTemplate(days);
 
-  function appendTypingIndicator() {
-    const div = document.createElement('div');
-    div.className = 'chat-msg ai';
-    div.id = 'chat-typing';
-    div.innerHTML = `<div class="chat-avatar">AI</div><div class="chat-bubble typing-bubble"><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span></div>`;
-    chatMessages.appendChild(div);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-  }
+    btn.disabled = true;
+    loading.classList.remove('hidden');
+    resultDiv.style.display = 'none';
 
-  function removeTypingIndicator() {
-    const el = document.getElementById('chat-typing');
-    if (el) el.remove();
-  }
-
-  async function sendChatMessage(text) {
-    if (!text.trim()) return;
-    appendChatMsg('user', text);
-    chatInput.value = '';
-    chatInput.style.height = 'auto';
-    btnChatSend.disabled = true;
-    chatHistory.push({ role: 'user', content: text });
-    appendTypingIndicator();
     try {
-      const cfg = getApiConfig();
-      if (!cfg.key) throw new Error('请先在设置中配置 API Key');
-      const messages = [
-        { role: 'system', content: getChatSystemPrompt() },
-        ...chatHistory.slice(-10)
-      ];
-      const res = await fetch(cfg.base + '/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
-        body: JSON.stringify({ model: cfg.model, messages, temperature: 0.7 }),
-      });
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error('API 错误 (' + res.status + '): ' + err.slice(0, 200));
-      }
-      const data = await res.json();
-      const reply = data.choices[0].message.content;
-      chatHistory.push({ role: 'assistant', content: reply });
-      removeTypingIndicator();
-      appendChatMsg('ai', reply);
+      const ctx = buildSummaryContext(days);
+      const sysPrompt = `你是"心流"效率系统的总结助手。根据用户近段时间的任务和习惯数据，生成一份简洁有力的总结分析。
+
+要求：
+1. 总结完成情况，指出亮点
+2. 分析存在的问题（逾期、习惯中断等）
+3. 给出具体可行的改进建议（2-3条）
+4. 整体鼓励，语气温暖务实
+5. 总字数控制在 200 字以内
+6. 不要使用 markdown 标题格式，直接使用文字段落`;
+
+      const aiReply = await callLLM(sysPrompt, ctx);
+      lastSummaryText = aiReply;
+      contentDiv.innerHTML = templateHtml + `<div class="summary-ai-insight"><strong>💡 AI 洞察</strong><br><br>${esc(aiReply)}</div>`;
     } catch (e) {
-      removeTypingIndicator();
-      appendChatMsg('ai', '连接失败: ' + e.message + '\n请检查设置中的 API Key 配置。');
+      lastSummaryText = '';
+      contentDiv.innerHTML = templateHtml + `<div class="summary-ai-insight" style="border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.08)"><strong>AI 分析失败</strong><br>${esc(e.message)}<br><br>以上为数据统计部分，AI 洞察需要配置 API Key。</div>`;
     } finally {
-      btnChatSend.disabled = false;
-      chatInput.focus();
+      btn.disabled = false;
+      loading.classList.add('hidden');
+      resultDiv.style.display = '';
     }
-  }
-
-  btnChatSend.addEventListener('click', () => sendChatMessage(chatInput.value));
-  chatInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(chatInput.value); }
-  });
-  chatInput.addEventListener('input', () => {
-    chatInput.style.height = 'auto';
-    chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
-  });
-  document.querySelectorAll('.chat-quick-btn').forEach(btn => {
-    btn.addEventListener('click', () => sendChatMessage(btn.dataset.prompt));
   });
 
-  // ===== CHAT: CLEAR =====
-  function resetChat() {
-    chatHistory = [];
-    chatMsgIndex = 0;
-    chatMessages.innerHTML = '';
-    appendChatMsg('ai', INITIAL_AI_MSG);
-    exitSelectMode();
-  }
+  document.getElementById('btn-download-summary').addEventListener('click', () => {
+    const days = document.getElementById('summary-range').value || 7;
+    const today = todayKey();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - parseInt(days));
+    const startKey = startDate.toISOString().slice(0, 10);
 
-  document.getElementById('btn-chat-clear').addEventListener('click', () => {
-    if (chatHistory.length === 0) return;
-    if (confirm('确定清空当前对话？未收藏的内容将丢失。')) resetChat();
-  });
-
-  // ===== CHAT: SELECT MODE =====
-  const chatSelectBar = document.getElementById('chat-select-bar');
-  const btnChatSelect = document.getElementById('btn-chat-select');
-
-  function enterSelectMode() {
-    chatSelectMode = true;
-    chatMessages.classList.add('selecting-mode');
-    chatSelectBar.classList.remove('hidden');
-    btnChatSelect.classList.add('active');
-  }
-
-  function exitSelectMode() {
-    chatSelectMode = false;
-    chatMessages.classList.remove('selecting-mode');
-    chatSelectBar.classList.add('hidden');
-    btnChatSelect.classList.remove('active');
-    // Uncheck all
-    chatMessages.querySelectorAll('.chat-msg-select.checked').forEach(el => el.classList.remove('checked'));
-  }
-
-  btnChatSelect.addEventListener('click', () => {
-    if (chatSelectMode) exitSelectMode();
-    else enterSelectMode();
-  });
-
-  document.getElementById('btn-chat-cancel-select').addEventListener('click', exitSelectMode);
-
-  document.getElementById('btn-chat-save-selected').addEventListener('click', () => {
-    const checked = chatMessages.querySelectorAll('.chat-msg-select.checked');
-    if (checked.length === 0) { alert('请先勾选要收藏的对话。'); return; }
-    const msgs = [];
-    checked.forEach(el => {
-      const msgDiv = el.closest('.chat-msg');
-      if (msgDiv) {
-        msgs.push({ role: msgDiv.dataset.role || 'ai', text: msgDiv.dataset.text || '' });
-      }
-    });
-    if (msgs.length === 0) return;
-    if (!Array.isArray(state.savedChats)) state.savedChats = [];
-    state.savedChats.push({
-      id: 'sc-' + genId(),
-      date: new Date().toISOString(),
-      messages: msgs,
-    });
-    saveState();
-    exitSelectMode();
-    alert('已收藏 ' + msgs.length + ' 条对话！');
-  });
-
-  // ===== CHAT: VIEW SAVED =====
-  const savedChatsOverlay = document.getElementById('saved-chats-overlay');
-  const savedChatsList = document.getElementById('saved-chats-list');
-
-  function renderSavedChats() {
-    const chats = state.savedChats || [];
-    savedChatsList.innerHTML = '';
-    if (chats.length === 0) {
-      savedChatsList.innerHTML = '<div class="saved-chats-empty">暂无收藏的对话。<br>在聊天界面点击「收藏对话」可以选择并保存。</div>';
-      return;
+    let text = `心流 · 近期总结报告\n`;
+    text += `=========================\n`;
+    text += `报告范围: ${startKey} ~ ${today}\n`;
+    text += `生成时间: ${new Date().toLocaleString('zh-CN')}\n\n`;
+    text += buildSummaryContext(parseInt(days));
+    if (lastSummaryText) {
+      text += `\n【AI 洞察与建议】\n${lastSummaryText}\n`;
     }
-    // Show newest first
-    [...chats].reverse().forEach((group, reverseIdx) => {
-      const realIdx = chats.length - 1 - reverseIdx;
-      const div = document.createElement('div');
-      div.className = 'saved-chat-group';
-      const d = new Date(group.date);
-      const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-      let html = `<div class="saved-chat-header"><span class="saved-chat-date">${dateStr}  (${group.messages.length} 条)</span><button class="saved-chat-delete" data-idx="${realIdx}" title="删除">&times;</button></div>`;
-      group.messages.forEach(m => {
-        const roleLabel = m.role === 'user' ? '我' : 'AI';
-        const cls = m.role === 'user' ? 'user' : 'ai';
-        html += `<div class="saved-chat-msg ${cls}"><div class="saved-chat-msg-role">${roleLabel}</div>${esc(m.text)}</div>`;
-      });
-      div.innerHTML = html;
-      div.querySelector('.saved-chat-delete').addEventListener('click', () => {
-        if (confirm('删除这条收藏？')) {
-          state.savedChats.splice(realIdx, 1);
-          saveState();
-          renderSavedChats();
-        }
-      });
-      savedChatsList.appendChild(div);
-    });
-  }
 
-  document.getElementById('btn-chat-saved').addEventListener('click', () => {
-    renderSavedChats();
-    savedChatsOverlay.classList.remove('hidden');
-  });
-  document.getElementById('saved-chats-close').addEventListener('click', () => {
-    savedChatsOverlay.classList.add('hidden');
-  });
-  savedChatsOverlay.addEventListener('click', (e) => {
-    if (e.target === savedChatsOverlay) savedChatsOverlay.classList.add('hidden');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `xinliu_summary_${today}.txt`;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
   });
 
   // ===== SETTINGS =====
@@ -1824,11 +1813,6 @@ ${taskCtx}`;
     (imported.quotes || []).forEach(q => {
       if (!existingQuotes.has(q)) { state.quotes.push(q); }
     });
-    // Merge savedChats: add new ones by id
-    const existingChatIds = new Set((state.savedChats || []).map(c => c.id));
-    (imported.savedChats || []).forEach(c => {
-      if (!existingChatIds.has(c.id)) { state.savedChats.push(c); }
-    });
     // Merge drops: take the higher total and combine history
     if (imported.drops) {
       if (!state.drops) state.drops = { total: 0, history: [] };
@@ -1920,12 +1904,10 @@ ${taskCtx}`;
 
     const today = todayKey();
     const undone = state.tasks.filter(t => !t.done);
-    const overdue = undone.filter(t => t.date && t.date < today);
     const todayTasks = undone.filter(t => t.date === today);
     const todayDone = state.tasks.filter(t => t.done && t.date === today);
 
     document.getElementById('dash-undone').textContent = undone.length;
-    document.getElementById('dash-overdue').textContent = overdue.length;
     document.getElementById('dash-today-count').textContent = todayTasks.length;
     document.getElementById('dash-focus-min').textContent = todayDone.length;
     updateDropsDisplay();
@@ -1967,37 +1949,7 @@ ${taskCtx}`;
       todayDiv.appendChild(el);
     });
 
-    // Overdue section
-    const overdueSection = document.getElementById('dash-overdue-section');
-    const overdueDiv = document.getElementById('dash-overdue-tasks');
-    if (overdue.length > 0) {
-      overdueSection.style.display = '';
-      overdueDiv.innerHTML = '';
-      overdue.forEach(t => {
-        const el = document.createElement('div');
-        el.className = 'dash-task-item';
-        const days = Math.round((new Date(today+'T00:00:00') - new Date(t.date+'T00:00:00')) / 86400000);
-        el.innerHTML = `<div class="dti-prio" style="background:var(--red)"></div><div class="dti-name">${esc(t.name)}</div><div class="dti-dl" style="background:rgba(239,68,68,.15);color:var(--red)">逾期${days}天</div>`;
-        el.addEventListener('click', () => { switchView('board'); openEditModal(t.id); });
-        overdueDiv.appendChild(el);
-      });
-    } else {
-      overdueSection.style.display = 'none';
-    }
   }
-
-  // ===== DASHBOARD QUICK ACTIONS =====
-  // Migrate all overdue tasks to today
-  document.getElementById('btn-migrate-overdue').addEventListener('click', () => {
-    const today = todayKey();
-    const overdue = state.tasks.filter(t => !t.done && t.date && t.date < today);
-    if (overdue.length === 0) return;
-    overdue.forEach(t => { t.date = today; });
-    saveState();
-    renderDashboard();
-    renderBoard();
-    alert('已将 ' + overdue.length + ' 个逾期任务迁移至今日。');
-  });
 
   // ===== CELEBRATION EFFECT =====
   // Only 100-drop milestones trigger celebration (handled in awardDrops / showWaterCelebration)
@@ -2095,7 +2047,7 @@ ${taskCtx}`;
       const totalDrops = logs.reduce((s, l) => s + (l.dropsEarned || 0), 0);
       const todayLogs = logs.filter(l => l.date === todayKey());
       const todayVal = todayLogs.reduce((s, l) => s + (l.value || 0), 0);
-      const unit = h.type === 'duration' ? '分钟' : '次';
+      const unit = h.type === 'duration' ? 'h' : '次';
       const el = document.createElement('div');
       el.className = 'habit-card';
       el.innerHTML = `
@@ -2126,7 +2078,7 @@ ${taskCtx}`;
       logDiv.innerHTML = '';
       [...allLogs].reverse().slice(0, 30).forEach(l => {
         const habit = habits.find(h => h.id === l.habitId);
-        const unit = (habit && habit.type === 'duration') ? '分钟' : '次';
+        const unit = (habit && habit.type === 'duration') ? 'h' : '次';
         const el = document.createElement('div');
         el.className = 'habit-log-item';
         el.innerHTML = `<span class="hli-date">${l.date}</span><span class="hli-icon">${(habit && habit.icon) || '🔄'}</span><span class="hli-name">${esc((habit && habit.name) || '已删除')}</span><span class="hli-val">${l.value} ${unit}</span><span class="hli-drops">+💧${l.dropsEarned}</span>`;
@@ -2155,12 +2107,26 @@ ${taskCtx}`;
   document.getElementById('habit-modal-close').addEventListener('click', () => habitModalOverlay.classList.add('hidden'));
   habitModalOverlay.addEventListener('click', (e) => { if (e.target === habitModalOverlay) habitModalOverlay.classList.add('hidden'); });
 
-  document.getElementById('btn-habit-save').addEventListener('click', () => {
+  document.getElementById('btn-habit-save').addEventListener('click', async () => {
     const name = document.getElementById('habit-edit-name').value.trim();
     if (!name) { alert('请输入习惯名称'); return; }
     const type = document.getElementById('habit-edit-type').value;
-    const icon = document.getElementById('habit-edit-icon').value.trim() || '🔄';
+    let icon = document.getElementById('habit-edit-icon').value.trim();
     const dropsPerUnit = parseInt(document.getElementById('habit-edit-drops').value) || 2;
+    // Auto-generate emoji if icon is empty and API is configured
+    if (!icon) {
+      const cfg = getApiConfig();
+      if (cfg.key) {
+        const btnSave = document.getElementById('btn-habit-save');
+        btnSave.disabled = true;
+        btnSave.textContent = '生成图标中...';
+        icon = await generateEmoji(name) || '🔄';
+        btnSave.disabled = false;
+        btnSave.textContent = '保存';
+      } else {
+        icon = '🔄';
+      }
+    }
     const habits = getHabits();
     if (editingHabitId) {
       const h = habits.find(x => x.id === editingHabitId);
@@ -2192,8 +2158,8 @@ ${taskCtx}`;
     if (!habit) return;
     document.getElementById('habit-log-title').textContent = habit.icon + ' ' + habit.name;
     const isDuration = habit.type === 'duration';
-    document.getElementById('habit-log-label').textContent = isDuration ? '完成时长 (分钟)' : '完成次数';
-    document.getElementById('habit-log-value').value = isDuration ? 30 : 1;
+    document.getElementById('habit-log-label').textContent = isDuration ? '完成时长 (小时)' : '完成次数';
+    document.getElementById('habit-log-value').value = isDuration ? 1 : 1;
     updateHabitLogPreview();
     habitLogOverlay.classList.remove('hidden');
   }
@@ -2201,13 +2167,13 @@ ${taskCtx}`;
   function updateHabitLogPreview() {
     const habit = getHabits().find(h => h.id === loggingHabitId);
     if (!habit) return;
-    const val = parseInt(document.getElementById('habit-log-value').value) || 0;
+    const val = parseFloat(document.getElementById('habit-log-value').value) || 0;
     let drops;
     if (habit.type === 'duration') {
-      drops = Math.floor(val / 60 * habit.dropsPerUnit);
-      if (drops === 0 && val > 0) drops = Math.max(1, Math.round(val / 60 * habit.dropsPerUnit));
+      drops = Math.floor(val * habit.dropsPerUnit);
+      if (drops === 0 && val > 0) drops = Math.max(1, Math.round(val * habit.dropsPerUnit));
     } else {
-      drops = val * habit.dropsPerUnit;
+      drops = Math.floor(val) * habit.dropsPerUnit;
     }
     document.getElementById('habit-log-drops-preview').textContent = '预计获得 💧 ' + drops + ' 水滴';
   }
@@ -2219,14 +2185,14 @@ ${taskCtx}`;
   document.getElementById('btn-habit-log-save').addEventListener('click', () => {
     const habit = getHabits().find(h => h.id === loggingHabitId);
     if (!habit) return;
-    const val = parseInt(document.getElementById('habit-log-value').value) || 0;
+    const val = parseFloat(document.getElementById('habit-log-value').value) || 0;
     if (val <= 0) { alert('请输入有效数值'); return; }
     let drops;
     if (habit.type === 'duration') {
-      drops = Math.floor(val / 60 * habit.dropsPerUnit);
-      if (drops === 0 && val > 0) drops = Math.max(1, Math.round(val / 60 * habit.dropsPerUnit));
+      drops = Math.floor(val * habit.dropsPerUnit);
+      if (drops === 0 && val > 0) drops = Math.max(1, Math.round(val * habit.dropsPerUnit));
     } else {
-      drops = val * habit.dropsPerUnit;
+      drops = Math.floor(val) * habit.dropsPerUnit;
     }
     // Record log
     getHabitLogs().push({
@@ -2357,15 +2323,29 @@ ${taskCtx}`;
   }
 
   // Add custom shop item
-  document.getElementById('btn-shop-add').addEventListener('click', () => {
+  document.getElementById('btn-shop-add').addEventListener('click', async () => {
     const nameInput = document.getElementById('shop-new-name');
     const priceInput = document.getElementById('shop-new-price');
     const iconInput = document.getElementById('shop-new-icon');
     const name = nameInput.value.trim();
     const price = parseInt(priceInput.value);
-    const icon = iconInput.value.trim() || '🎁';
+    let icon = iconInput.value.trim();
     if (!name) { showShopToast('请输入商品名称', 'error'); return; }
     if (!price || price <= 0) { showShopToast('请输入有效价格', 'error'); return; }
+    // Auto-generate emoji if icon is empty and API is configured
+    if (!icon) {
+      const cfg = getApiConfig();
+      if (cfg.key) {
+        const btnAdd = document.getElementById('btn-shop-add');
+        btnAdd.disabled = true;
+        btnAdd.textContent = '生成图标...';
+        icon = await generateEmoji(name) || '🎁';
+        btnAdd.disabled = false;
+        btnAdd.textContent = '添加商品';
+      } else {
+        icon = '🎁';
+      }
+    }
     const items = getShopItems();
     items.push({ id: 'shop-' + genId(), name, icon, price, stock: -1 });
     saveState();
@@ -2426,9 +2406,9 @@ ${taskCtx}`;
 
     // Demo habit logs
     state.habitLogs = [
-      { id: 'hlog-d1', habitId: 'habit-demo-1', date: today, value: 60, dropsEarned: 4 },
-      { id: 'hlog-d2', habitId: 'habit-demo-2', date: today, value: 45, dropsEarned: 6 },  // rounded up
-      { id: 'hlog-d3', habitId: 'habit-demo-3', date: today, value: 20, dropsEarned: 3 },
+      { id: 'hlog-d1', habitId: 'habit-demo-1', date: today, value: 1, dropsEarned: 4 },
+      { id: 'hlog-d2', habitId: 'habit-demo-2', date: today, value: 0.75, dropsEarned: 4 },
+      { id: 'hlog-d3', habitId: 'habit-demo-3', date: today, value: 0.5, dropsEarned: 1 },
     ];
 
     // Demo shop history
