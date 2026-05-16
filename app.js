@@ -267,10 +267,16 @@
   function startSyncPolling() {
     // Poll every 5 seconds for cross-device sync (less aggressive than 3s)
     syncPollInterval = setInterval(pollServerSync, 5000);
-    // Also sync on visibility change (when user switches back to tab/app)
+    // Sync on visibility change: poll server + daily maintenance check
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         pollServerSync();
+        const today = todayKey();
+        if (state.lastDailyCheck !== today) {
+          dailyMaintenance();
+          renderActiveView();
+          updateDropsDisplay();
+        }
       }
     });
   }
@@ -567,18 +573,11 @@
 
   function addTask(t) {
     const maxOrder = state.tasks.reduce((m, x) => Math.max(m, x.sortOrder || 0), -1);
-    // Handle backward compat: category -> tags
-    let tags = t.tags || [];
-    if (t.category && tags.length === 0) {
-      const CATEGORY_TAG_MAP = { vocation: 'tag-vocation', being: 'tag-being', romance: 'tag-romance' };
-      const tagId = CATEGORY_TAG_MAP[t.category];
-      if (tagId) tags = [tagId];
-    }
     const task = {
       id: genId(),
       name: t.name || '未命名任务',
       quadrant: t.quadrant || 'important',
-      tags: tags,
+      tags: t.tags || [],
       date: t.date || todayKey(),
       time: t.time || '',
       duration: t.duration || 30,
@@ -613,7 +612,7 @@
   function todayKey() { return new Date().toISOString().slice(0, 10); }
 
   // ===== SHARED HELPERS =====
-  function getDropsHistory() { return getDropsHistory(); }
+  function getDropsHistory() { return (state.drops && state.drops.history) || []; }
   function dateRange(days) {
     const today = todayKey();
     const start = new Date();
@@ -1122,7 +1121,7 @@
     });
   }
   // Apply to all emoji input fields
-  document.querySelectorAll('#habit-edit-icon, #shop-new-icon').forEach(setupEmojiInput);
+  document.querySelectorAll('#habit-edit-icon, #shop-new-icon, #shop-edit-icon').forEach(setupEmojiInput);
 
   // ===== EDIT MODAL =====
   const modalOverlay = document.getElementById('modal-overlay');
@@ -1320,17 +1319,7 @@
       scheduleMidnightRefresh();
     }, msUntilMidnight);
   }
-  // Also check on visibility change (covers case where device was sleeping at midnight)
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      const today = todayKey();
-      if (state.lastDailyCheck !== today) {
-        dailyMaintenance();
-        renderActiveView();
-        updateDropsDisplay();
-      }
-    }
-  });
+  // Note: visibilitychange handler is consolidated in startSyncPolling()
 
   // ===== MANUAL REFRESH BUTTON =====
   document.getElementById('btn-manual-refresh').addEventListener('click', function() {
@@ -2072,12 +2061,11 @@
     if (todayTasks.length === 0) {
       todayDiv.innerHTML = '<div style="color:var(--text-muted);font-size:.85rem;padding:.3rem 0">今天没有待办任务，好好休息或者去倒空大脑添加一些。</div>';
     }
-    const prioColors = { 'urgent-important': 'var(--q1)', 'important': 'var(--q2)', 'urgent': 'var(--q3)', 'neither': 'var(--q4)' };
     todayTasks.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
     todayTasks.forEach(t => {
       const el = document.createElement('div');
       el.className = 'dash-task-item';
-      el.innerHTML = `<div class="dti-prio" style="background:${prioColors[t.quadrant]||'var(--q4)'}"></div><div class="dti-name">${esc(t.name)}</div>${t.time ? '<div class="dti-time">'+t.time+'</div>' : ''}`;
+      el.innerHTML = `<div class="dti-prio" style="background:${PRIORITY_COLORS[t.quadrant]||'var(--q4)'}"></div><div class="dti-name">${esc(t.name)}</div>${t.time ? '<div class="dti-time">'+t.time+'</div>' : ''}`;
       el.addEventListener('click', () => { switchView('board'); openEditModal(t.id); });
       todayDiv.appendChild(el);
     });

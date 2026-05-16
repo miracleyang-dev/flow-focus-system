@@ -66,6 +66,13 @@ npm start
 
 Redis 可选，无 Redis 时自动使用 JSON 文件存储。云端部署配置 `REDIS_URL` 和 `PORT` 环境变量即可。
 
+## 后端与存储说明
+
+- 健康检查：`GET /api/health`，返回服务端与 Redis 状态
+- Redis 环境变量：`REDIS_URL` / `REDIS_PRIVATE_URL` / `REDIS_PUBLIC_URL`
+- 本地备份：服务端同时写入 `data.json`
+- 保存限制：单次保存请求体最大 5MB
+
 ## 开源协议
 
 [MIT License](LICENSE)

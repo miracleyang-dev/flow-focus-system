@@ -273,7 +273,7 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 /* ===== DASHBOARD VIEW ===== */
 .dash-greeting{margin-bottom:1.2rem}
 .dash-greeting h1{font-size:1.8rem;font-weight:700}
-.dash-date{color:var(--text-dim);font-size:.92rem;margin-top:.2rem}
+.dash-date{color:var(--text-dim);font-size:.92rem;margin-top:.2rem;display:inline}
 .dash-quote{
   background:var(--accent-dim);border-left:3px solid var(--accent);padding:.8rem 1.1rem;
   border-radius:0 var(--radius-sm) var(--radius-sm) 0;font-size:.88rem;color:var(--text-dim);
@@ -522,6 +522,12 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
 .drops-history-empty{text-align:center;color:var(--text-muted);padding:1rem;font-size:.85rem}
 
 /* ===== RESPONSIVE ===== */
+/* Manual refresh button (inline with date) */
+.btn-manual-refresh{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;margin-left:6px;vertical-align:middle;color:var(--text-muted);background:none;border:1px solid transparent;border-radius:6px;cursor:pointer;transition:all .2s;opacity:.6}
+.btn-manual-refresh:hover{color:var(--accent);opacity:1;border-color:var(--border)}
+.btn-manual-refresh:active{transform:scale(.9)}
+.btn-manual-refresh.refreshing svg{animation:spin .8s linear infinite}
+
 @media(max-width:768px){
   #sidebar{transform:translateX(-100%)}
   #sidebar.open{transform:translateX(0)}
@@ -564,16 +570,6 @@ input,select,textarea,button{font-family:inherit;font-size:inherit}
   /* Settings tag row */
   .setting-list-item{padding:.5rem .6rem}
 }
-@media(max-width:380px){
-}
-
-/* Manual refresh button (inline with date) */
-.dash-date{display:inline}
-.btn-manual-refresh{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;margin-left:6px;vertical-align:middle;color:var(--text-muted);background:none;border:1px solid transparent;border-radius:6px;cursor:pointer;transition:all .2s;opacity:.6}
-.btn-manual-refresh:hover{color:var(--accent);opacity:1;border-color:var(--border)}
-.btn-manual-refresh:active{transform:scale(.9)}
-.btn-manual-refresh.refreshing svg{animation:spin .8s linear infinite}
-@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 
 /* PWA standalone safe area */
 @media(display-mode: standalone){

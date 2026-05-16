@@ -150,19 +150,24 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/data' && method === 'POST') {
     let body = '';
     let bodySize = 0;
+    let aborted = false;
     const MAX_BODY = 5 * 1024 * 1024; // 5MB 限制
 
     req.on('data', chunk => {
       bodySize += chunk.length;
       if (bodySize > MAX_BODY) {
-        res.writeHead(413, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: 0, msg: '数据过大（超过 5MB）' }));
-        req.destroy();
+        if (!aborted) {
+          aborted = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: 0, msg: '数据过大（超过 5MB）' }));
+          req.destroy();
+        }
         return;
       }
       body += chunk;
     });
     req.on('end', async () => {
+      if (aborted) return;
       let savedToRedis = false;
       let savedToFile = false;
       let error = '';
@@ -210,7 +215,7 @@ const server = http.createServer(async (req, res) => {
   const resolved = path.resolve(path.join(__dirname, filePath));
 
   // 确保文件路径不超出项目目录
-  if (!resolved.startsWith(__dirname)) {
+  if (!resolved.startsWith(__dirname + path.sep) && resolved !== __dirname) {
     res.writeHead(403);
     res.end('403 Forbidden');
     return;
