@@ -30,6 +30,7 @@
       quotes: [],
       userInfo: { name: '' },
       drops: { total: 0, history: [] },
+      timeBlocks: [],
       lastDailyCheck: '',
       lastModified: 0,
     };
@@ -47,6 +48,7 @@
     if (!merged.lastDailyCheck) merged.lastDailyCheck = '';
     if (!Array.isArray(merged.shopItems)) merged.shopItems = null; // will be initialized with defaults on first access
     if (!Array.isArray(merged.shopHistory)) merged.shopHistory = [];
+    if (!Array.isArray(merged.timeBlocks)) merged.timeBlocks = [];
     // Migrate tasks: category -> tags
     migrateTasks(merged);
     return merged;
@@ -172,6 +174,7 @@
     dashboard: () => renderDashboard(),
     board: () => renderBoard(),
     gantt: () => renderGantt(),
+    timeblock: () => renderTimeBlock(),
     habits: () => renderHabits(),
     shop: () => renderShop(),
     settings: () => { loadSettingsUI(); renderSettingsLists(); },
@@ -334,7 +337,7 @@
   const menuToggle = document.getElementById('menu-toggle');
   const mobileTitle = document.getElementById('mobile-title');
 
-  const viewTitles = { dashboard: '仪表盘', dump: '倒空大脑', board: '任务看板', gantt: '甘特图', summary: '近期总结', habits: '长期习惯', shop: '消费商城', settings: '设置' };
+  const viewTitles = { dashboard: '仪表盘', dump: '倒空大脑', board: '任务看板', gantt: '甘特图', timeblock: '时间记录', summary: '近期总结', habits: '长期习惯', shop: '消费商城', settings: '设置' };
 
   function switchView(name) {
     navItems.forEach(n => n.classList.toggle('active', n.dataset.view === name));
@@ -609,7 +612,13 @@
     saveState();
   }
 
-  function todayKey() { return new Date().toISOString().slice(0, 10); }
+  function localDateKey(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  function todayKey() { return localDateKey(new Date()); }
 
   // ===== SHARED HELPERS =====
   function getDropsHistory() { return (state.drops && state.drops.history) || []; }
@@ -617,7 +626,7 @@
     const today = todayKey();
     const start = new Date();
     start.setDate(start.getDate() - (days - 1));
-    return { startKey: start.toISOString().slice(0, 10), today };
+    return { startKey: localDateKey(start), today };
   }
   function filterByRange(items, startKey, endKey) {
     return items.filter(i => i.date >= startKey && i.date <= endKey);
@@ -1295,7 +1304,7 @@
     // 3. Trim logs to last 90 days to prevent unbounded growth
     const cutoff90 = new Date();
     cutoff90.setDate(cutoff90.getDate() - 90);
-    const cutoffKey = cutoff90.toISOString().slice(0, 10);
+    const cutoffKey = localDateKey(cutoff90);
     if (state.taskLogs) state.taskLogs = state.taskLogs.filter(l => l.date >= cutoffKey);
     if (state.habitLogs) state.habitLogs = state.habitLogs.filter(l => l.date >= cutoffKey);
     if (state.shopHistory) state.shopHistory = state.shopHistory.filter(h => h.date >= cutoffKey);
@@ -1342,7 +1351,7 @@
     const container = document.getElementById('gantt-container');
     const today = new Date(todayKey() + 'T00:00:00');
     const isMobile = window.innerWidth <= 768;
-    const dayCount = isMobile ? 5 : 14;
+    const dayCount = isMobile ? 7 : 14;
     const days = [];
     for (let i = 0; i < dayCount; i++) {
       const d = new Date(today);
@@ -1358,70 +1367,85 @@
     };
 
     // Filter tasks that have dates within the range or before
-    const endKey = days[days.length-1].toISOString().slice(0,10);
+    const endKey = localDateKey(days[days.length-1]);
     const tasksInRange = state.tasks.filter(t => {
       if (!t.date) return false;
       return t.date <= endKey;
     }).sort((a,b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
 
     let html = '';
-    // Priority legend
-    html += '<div class="gantt-legend">';
-    html += '<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#ef4444"></span>重要紧急</span>';
-    html += '<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#6366f1"></span>重要</span>';
-    html += '<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#f97316"></span>紧急</span>';
-    html += '<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#64748b"></span>一般</span>';
-    html += '</div>';
 
     if (isMobile) {
-      // === MOBILE: Vertical card-based layout (no horizontal scroll needed) ===
+      // Mobile legend: show tags
+      html += '<div class="gantt-legend">';
+      const tags = state.tags || [];
+      if (tags.length > 0) {
+        tags.forEach(tag => {
+          html += `<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:${tag.color}"></span>${esc(tag.name)}</span>`;
+        });
+      }
+      html += '<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#64748b"></span>无标签</span>';
+      html += '</div>';
+
+      // === MOBILE: Compact week grid view ===
       html += '<div class="gantt-mobile">';
-      // Date tabs
-      html += '<div class="gantt-m-dates">';
-      days.forEach((d, i) => {
-        const key = d.toISOString().slice(0,10);
+      // Group tasks by date
+      const tasksByDate = {};
+      days.forEach(d => { tasksByDate[localDateKey(d)] = []; });
+      tasksInRange.forEach(t => {
+        const key = t.date;
+        if (tasksByDate[key]) tasksByDate[key].push(t);
+        else {
+          // Task date before range start — put on first day
+          const firstKey = localDateKey(days[0]);
+          if (tasksByDate[firstKey]) tasksByDate[firstKey].push(t);
+        }
+      });
+      // Week grid: 7 columns, each column is a day with stacked task chips
+      html += '<div class="gantt-week-grid">';
+      days.forEach(d => {
+        const key = localDateKey(d);
         const isToday = key === todayKey();
         const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-        html += `<div class="gantt-m-date${isToday ? ' today' : ''}${isWeekend ? ' weekend' : ''}">
-          <span class="gantt-m-day">${d.getDate()}</span>
-          <span class="gantt-m-wd">周${weekdayNames[d.getDay()]}</span>
-        </div>`;
+        const dayTasks = tasksByDate[key] || [];
+        html += `<div class="gantt-week-col${isToday ? ' today' : ''}${isWeekend ? ' weekend' : ''}">`;
+        html += `<div class="gantt-week-hd">`;
+        html += `<span class="gantt-week-wd">周${weekdayNames[d.getDay()]}</span>`;
+        html += `<span class="gantt-week-dd">${d.getDate()}</span>`;
+        html += `</div>`;
+        html += `<div class="gantt-week-chips">`;
+        if (dayTasks.length === 0) {
+          html += `<div class="gantt-week-empty"></div>`;
+        }
+        dayTasks.forEach(t => {
+          // Use first tag color if available, fallback to muted
+          const firstTag = (t.tags || []).length > 0 ? getTag(t.tags[0]) : null;
+          const chipColor = firstTag ? firstTag.color : '#64748b';
+          const shortName = t.name.length > 4 ? t.name.slice(0,4) + '..' : t.name;
+          html += `<div class="gantt-week-chip${t.done ? ' done' : ''}" style="background:${chipColor}" title="${esc(t.name)}">${esc(shortName)}</div>`;
+        });
+        html += `</div></div>`;
       });
       html += '</div>';
-      // Task bars below dates
-      if (tasksInRange.length === 0) {
-        html += '<div style="padding:1.5rem;color:var(--text-muted);text-align:center;font-size:.85rem">未来五天暂无任务</div>';
-      }
-      tasksInRange.forEach(t => {
-        const durationMinutes = Number.isFinite(t.duration) ? t.duration : 30;
-        const taskDate = new Date(t.date + 'T00:00:00');
-        const durationDays = Math.max(1, Math.ceil(durationMinutes / 480));
-        const startDiff = Math.round((taskDate - today) / 86400000);
-        const barStart = Math.max(0, startDiff);
-        const barEnd = Math.min(dayCount - 1, barStart + durationDays - 1);
-        if (barStart > dayCount - 1) return;
-        const leftPct = (barStart / dayCount * 100).toFixed(2);
-        const widthPct = ((barEnd - barStart + 1) / dayCount * 100).toFixed(2);
-        const barColor = prioBarColors[t.quadrant] || '#64748b';
-        const prioLabel = PRIORITY_LABELS[t.quadrant] || '一般';
-        html += `<div class="gantt-m-row">
-          <div class="gantt-m-bar${t.done ? ' done' : ''}" style="margin-left:${leftPct}%;width:${widthPct}%;background:${barColor}">
-            <span class="gantt-m-bar-name">${esc(t.name)}</span>
-          </div>
-          <div class="gantt-m-meta">
-            <span class="gantt-m-prio" style="color:${barColor}">${prioLabel}</span>
-            <span class="gantt-m-dur">${durationMinutes}分钟</span>
-          </div>
-        </div>`;
-      });
+      // Total task count below
+      const totalInRange = tasksInRange.length;
+      const doneInRange = tasksInRange.filter(t => t.done).length;
+      html += `<div class="gantt-week-footer">${totalInRange} 个任务 · ${doneInRange} 已完成</div>`;
       html += '</div>';
     } else {
+      // Desktop legend: priorities
+      html += '<div class="gantt-legend">';
+      html += '<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#ef4444"></span>重要紧急</span>';
+      html += '<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#6366f1"></span>重要</span>';
+      html += '<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#f97316"></span>紧急</span>';
+      html += '<span class="gantt-legend-item"><span class="gantt-legend-dot" style="background:#64748b"></span>一般</span>';
+      html += '</div>';
       // === DESKTOP: Traditional horizontal Gantt chart ===
       html += '<div class="gantt-chart">';
       html += '<div class="gantt-header">';
       html += '<div class="gantt-label-col">任务</div>';
       days.forEach(d => {
-        const key = d.toISOString().slice(0,10);
+        const key = localDateKey(d);
         const isToday = key === todayKey();
         const isWeekend = d.getDay() === 0 || d.getDay() === 6;
         html += `<div class="gantt-day-col${isToday ? ' today' : ''}${isWeekend ? ' weekend' : ''}">${d.getMonth()+1}/${d.getDate()}<br>周${weekdayNames[d.getDay()]}</div>`;
@@ -1436,7 +1460,7 @@
         html += `<div class="gantt-row-label" title="${esc(t.name)}">${esc(t.name)}</div>`;
         html += '<div class="gantt-row-cells">';
         days.forEach(d => {
-          const key = d.toISOString().slice(0,10);
+          const key = localDateKey(d);
           const isToday = key === todayKey();
           html += `<div class="gantt-cell${isToday ? ' today' : ''}"></div>`;
         });
@@ -1477,7 +1501,9 @@
       ? allDrops.filter(h => h.amount > 0 && h.reason && h.reason.startsWith('完成任务:'))
       : [];
     const taskCount = taskLogs.length || taskDropsFallback.length;
-    return { startKey, today, taskLogs, habitLogs, shopHist, habits, pendingTasks, allDrops, dropsEarned, dropsSpent, taskDropsFallback, taskCount };
+    // Time blocks in range
+    const timeBlocksInRange = (state.timeBlocks || []).filter(b => b.date >= startKey && b.date <= today);
+    return { startKey, today, taskLogs, habitLogs, shopHist, habits, pendingTasks, allDrops, dropsEarned, dropsSpent, taskDropsFallback, taskCount, timeBlocksInRange };
   }
 
   function buildSummaryContext(days) {
@@ -1543,6 +1569,37 @@
     ctx += `期间消费水滴: ${d.dropsSpent} 滴\n`;
     ctx += `当前水滴余额: ${(state.drops && state.drops.total) || 0} 滴\n`;
 
+    ctx += `\n【时间记录】\n`;
+    if (d.timeBlocksInRange.length === 0) {
+      ctx += `该时段无时间记录\n`;
+    } else {
+      // Group by date then summarize categories
+      const tbByDate = {};
+      d.timeBlocksInRange.forEach(b => {
+        if (!tbByDate[b.date]) tbByDate[b.date] = [];
+        tbByDate[b.date].push(b);
+      });
+      Object.keys(tbByDate).sort().forEach(date => {
+        const dayBlocks = tbByDate[date];
+        const catTotals = {};
+        let dayTotal = 0;
+        dayBlocks.forEach(b => {
+          const dur = timeToMinutes(b.end) - timeToMinutes(b.start);
+          if (dur > 0) {
+            catTotals[b.category] = (catTotals[b.category] || 0) + dur;
+            dayTotal += dur;
+          }
+        });
+        const catLabels = { work:'工作', study:'学习', exercise:'运动', rest:'休息', life:'生活', commute:'通勤', other:'其他' };
+        const catStr = Object.entries(catTotals).map(([c, m]) => `${catLabels[c]||c} ${Math.floor(m/60)}h${m%60>0?m%60+'m':''}`).join(', ');
+        ctx += `  ${date}: 共记录 ${Math.floor(dayTotal/60)}h${dayTotal%60>0?dayTotal%60+'m':''} (${catStr})\n`;
+        dayBlocks.forEach(b => {
+          const displayName = b.taskId ? ((state.tasks.find(t => t.id === b.taskId) || {}).name || b.name) : b.name;
+          ctx += `    ${b.start}-${b.end} ${displayName} [${catLabels[b.category]||b.category}]\n`;
+        });
+      });
+    }
+
     return ctx;
   }
 
@@ -1557,6 +1614,8 @@
     html += `<li>消费兑换: <strong>${d.shopHist.length}</strong> 次</li>`;
     html += `<li>获得水滴: <strong style="color:var(--cyan)">${d.dropsEarned}</strong> 滴</li>`;
     html += `<li>消费水滴: <strong style="color:var(--text-muted)">${d.dropsSpent}</strong> 滴</li>`;
+    const tbTotalMin = d.timeBlocksInRange.reduce((s,b) => { const dur = timeToMinutes(b.end) - timeToMinutes(b.start); return s + (dur > 0 ? dur : 0); }, 0);
+    html += `<li>时间记录: <strong>${d.timeBlocksInRange.length}</strong> 条 (${Math.floor(tbTotalMin/60)}h${tbTotalMin%60>0?tbTotalMin%60+'m':''})</li>`;
     html += `</ul></div>`;
 
     // Completed tasks
@@ -1614,6 +1673,23 @@
       html += `</ul></div>`;
     }
 
+    // Time blocks
+    if (d.timeBlocksInRange.length > 0) {
+      html += `<div class="summary-section"><h4>⏱ 时间记录</h4><ul>`;
+      const catLabels = { work:'工作', study:'学习', exercise:'运动', rest:'休息', life:'生活', commute:'通勤', other:'其他' };
+      const tbCatTotals = {};
+      d.timeBlocksInRange.forEach(b => {
+        const dur = timeToMinutes(b.end) - timeToMinutes(b.start);
+        if (dur > 0) tbCatTotals[b.category] = (tbCatTotals[b.category] || 0) + dur;
+      });
+      for (const [cat, mins] of Object.entries(tbCatTotals).sort((a,b) => b[1]-a[1])) {
+        const hrs = Math.floor(mins/60);
+        const m = mins % 60;
+        html += `<li>${catLabels[cat]||cat}: ${hrs > 0 ? hrs+'h':''}${m>0?m+'m':''}</li>`;
+      }
+      html += `</ul></div>`;
+    }
+
     return html;
   }
 
@@ -1648,15 +1724,16 @@
 
     try {
       const ctx = buildSummaryContext(days);
-      const sysPrompt = `你是"心流"效率系统的总结助手。根据用户近段时间的任务和习惯数据，生成一份简洁有力的总结分析。
+      const sysPrompt = `你是"心流"效率系统的总结助手。根据用户近段时间的任务、习惯和时间记录数据，生成一份简洁有力的总结分析。
 
 要求：
 1. 总结完成情况，指出亮点
-2. 分析存在的问题（逾期、习惯中断等）
-3. 给出具体可行的改进建议（2-3条）
-4. 整体鼓励，语气温暖务实
-5. 总字数控制在 200 字以内
-6. 不要使用 markdown 标题格式，直接使用文字段落`;
+2. 分析时间分配是否合理（基于时间记录数据，如工作/学习/休息占比）
+3. 分析存在的问题（逾期、习惯中断、时间碎片化等）
+4. 给出具体可行的改进建议（2-3条）
+5. 整体鼓励，语气温暖务实
+6. 总字数控制在 250 字以内
+7. 不要使用 markdown 标题格式，直接使用文字段落`;
 
       const aiReply = await callLLM(sysPrompt, ctx);
       lastSummaryText = aiReply;
@@ -1676,7 +1753,7 @@
     const today = todayKey();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - (days - 1));
-    const startKey = startDate.toISOString().slice(0, 10);
+    const startKey = localDateKey(startDate);
 
     let text = `心流 · 近期总结报告\n`;
     text += `=========================\n`;
@@ -2554,10 +2631,460 @@
     }
   });
 
+  // ===== TIME BLOCK VIEW =====
+  const TB_CATEGORIES = {
+    work: { label: '工作', color: '#6366f1' },
+    study: { label: '学习', color: '#06b6d4' },
+    exercise: { label: '运动', color: '#22c55e' },
+    rest: { label: '休息', color: '#eab308' },
+    life: { label: '生活', color: '#f97316' },
+    commute: { label: '通勤', color: '#8b5cf6' },
+    other: { label: '其他', color: '#64748b' },
+  };
+  let tbViewDate = todayKey();
+  let editingBlockId = null;
+
+  function getTimeBlocks() { return state.timeBlocks || []; }
+
+  // Convert "HH:MM" to minutes from midnight
+  function timeToMinutes(t) {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + (m || 0);
+  }
+  // Convert slot index to "HH:MM"
+  function slotToTime(slot) {
+    const totalMin = 7 * 60 + slot * 30;
+    return String(Math.floor(totalMin / 60)).padStart(2,'0') + ':' + String(totalMin % 60).padStart(2,'0');
+  }
+  // Total slots: 7:00 - 24:00 = 17h = 34 half-hour slots
+  const TB_SLOT_COUNT = 34;
+
+  // Long-press / drag state
+  let tbDragStart = null;
+  let tbDragEnd = null;
+  let tbDragging = false;
+  let tbLongPressTimer = null;
+
+  function renderTimeBlock() {
+    // Update date label
+    const dateLabel = document.getElementById('tb-current-date');
+    if (dateLabel) {
+      const d = new Date(tbViewDate + 'T00:00:00');
+      const weekNames = ['日','一','二','三','四','五','六'];
+      const isToday = tbViewDate === todayKey();
+      dateLabel.textContent = `${d.getMonth()+1}月${d.getDate()}日 周${weekNames[d.getDay()]}${isToday ? '（今天）' : ''}`;
+    }
+
+    const timeline = document.getElementById('tb-timeline');
+    const blocks = getTimeBlocks().filter(b => b.date === tbViewDate).sort((a,b) => a.start.localeCompare(b.start));
+
+    // Build a map: slot index -> block info
+    const slotMap = new Array(TB_SLOT_COUNT).fill(null); // each element: null or { block, isStart, isEnd, isMid }
+    blocks.forEach(b => {
+      const startMin = timeToMinutes(b.start);
+      const endMin = timeToMinutes(b.end);
+      const startSlot = Math.max(0, Math.floor((startMin - 7 * 60) / 30));
+      const endSlot = Math.min(TB_SLOT_COUNT - 1, Math.ceil((endMin - 7 * 60) / 30) - 1);
+      for (let s = startSlot; s <= endSlot; s++) {
+        slotMap[s] = {
+          block: b,
+          isStart: s === startSlot,
+          isEnd: s === endSlot,
+          span: endSlot - startSlot + 1,
+        };
+      }
+    });
+
+    let html = '<div class="tb-grid">';
+    for (let s = 0; s < TB_SLOT_COUNT; s++) {
+      const timeStr = slotToTime(s);
+      const isHour = s % 2 === 0;
+      const entry = slotMap[s];
+
+      html += `<div class="tb-slot${isHour ? ' tb-slot-hour' : ''}" data-slot="${s}">`;
+      html += `<span class="tb-slot-time">${isHour ? timeStr : ''}</span>`;
+
+      if (entry && entry.isStart) {
+        const b = entry.block;
+        const cat = TB_CATEGORIES[b.category] || TB_CATEGORIES.other;
+        const displayName = b.taskId ? ((state.tasks.find(t => t.id === b.taskId) || {}).name || b.name) : b.name;
+        const spanSlots = entry.span;
+        const heightPx = spanSlots * 36 - 2; // 36px per slot minus gap
+        html += `<div class="tb-slot-block" style="background:${cat.color};height:${heightPx}px" data-block-id="${b.id}">`;
+        html += `<span class="tb-slot-block-name">${esc(displayName)}</span>`;
+        html += `<span class="tb-slot-block-time">${b.start} - ${b.end}</span>`;
+        html += `</div>`;
+      } else if (!entry) {
+        html += `<div class="tb-slot-empty" data-slot="${s}"></div>`;
+      }
+
+      html += `</div>`;
+    }
+    html += '</div>';
+
+    if (timeline) {
+      timeline.innerHTML = html;
+      bindTimelineEvents(timeline);
+    }
+
+    renderTimeBlockSummary(blocks);
+  }
+
+  function bindTimelineEvents(timeline) {
+    // Click on filled block -> edit
+    timeline.querySelectorAll('.tb-slot-block').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openTimeBlockModal(el.dataset.blockId);
+      });
+    });
+
+    // Click on empty slot -> add at that slot
+    timeline.querySelectorAll('.tb-slot-empty').forEach(el => {
+      el.addEventListener('click', (e) => {
+        if (tbDragging) return;
+        const slot = parseInt(el.dataset.slot);
+        openTimeBlockModalAtSlot(slot, slot);
+      });
+    });
+
+    // Long-press / drag on empty slots to select range
+    const slots = timeline.querySelectorAll('.tb-slot');
+    slots.forEach(slotEl => {
+      // Mouse events
+      slotEl.addEventListener('mousedown', (e) => {
+        const slot = parseInt(slotEl.dataset.slot);
+        if (slotMap_hasBlock(slot)) return;
+        tbDragStart = slot;
+        tbDragEnd = slot;
+        tbDragging = false;
+        updateSlotSelection(timeline);
+        e.preventDefault();
+      });
+      slotEl.addEventListener('mouseenter', () => {
+        if (tbDragStart === null) return;
+        const slot = parseInt(slotEl.dataset.slot);
+        tbDragEnd = slot;
+        tbDragging = true;
+        updateSlotSelection(timeline);
+      });
+
+      // Touch events
+      slotEl.addEventListener('touchstart', (e) => {
+        const slot = parseInt(slotEl.dataset.slot);
+        if (slotMap_hasBlock(slot)) return;
+        tbDragStart = slot;
+        tbDragEnd = slot;
+        tbDragging = false;
+        tbLongPressTimer = setTimeout(() => {
+          tbDragging = true;
+          updateSlotSelection(timeline);
+        }, 300);
+      }, { passive: true });
+      slotEl.addEventListener('touchmove', (e) => {
+        if (tbDragStart === null) return;
+        clearTimeout(tbLongPressTimer);
+        const touch = e.touches[0];
+        const el = document.elementFromPoint(touch.clientX, touch.clientY);
+        if (el) {
+          const s = el.closest('.tb-slot');
+          if (s) {
+            tbDragEnd = parseInt(s.dataset.slot);
+            tbDragging = true;
+            updateSlotSelection(timeline);
+          }
+        }
+        e.preventDefault();
+      }, { passive: false });
+    });
+
+    // Global mouseup / touchend -> finalize selection
+    function handleDragEnd() {
+      clearTimeout(tbLongPressTimer);
+      if (tbDragStart !== null && tbDragging && tbDragEnd !== null) {
+        const from = Math.min(tbDragStart, tbDragEnd);
+        const to = Math.max(tbDragStart, tbDragEnd);
+        tbDragStart = null;
+        tbDragEnd = null;
+        tbDragging = false;
+        clearSlotSelection(timeline);
+        openTimeBlockModalAtSlot(from, to);
+      } else {
+        tbDragStart = null;
+        tbDragEnd = null;
+        tbDragging = false;
+        clearSlotSelection(timeline);
+      }
+    }
+    timeline._tbMouseUp = handleDragEnd;
+    document.addEventListener('mouseup', handleDragEnd);
+    document.addEventListener('touchend', handleDragEnd);
+  }
+
+  function slotMap_hasBlock(slot) {
+    const blocks = getTimeBlocks().filter(b => b.date === tbViewDate);
+    for (const b of blocks) {
+      const startSlot = Math.max(0, Math.floor((timeToMinutes(b.start) - 7*60) / 30));
+      const endSlot = Math.min(TB_SLOT_COUNT - 1, Math.ceil((timeToMinutes(b.end) - 7*60) / 30) - 1);
+      if (slot >= startSlot && slot <= endSlot) return true;
+    }
+    return false;
+  }
+
+  function updateSlotSelection(timeline) {
+    const from = Math.min(tbDragStart, tbDragEnd);
+    const to = Math.max(tbDragStart, tbDragEnd);
+    timeline.querySelectorAll('.tb-slot').forEach(el => {
+      const s = parseInt(el.dataset.slot);
+      el.classList.toggle('tb-slot-selecting', s >= from && s <= to);
+    });
+  }
+
+  function clearSlotSelection(timeline) {
+    timeline.querySelectorAll('.tb-slot').forEach(el => el.classList.remove('tb-slot-selecting'));
+  }
+
+  function openTimeBlockModalAtSlot(fromSlot, toSlot) {
+    const startTime = slotToTime(fromSlot);
+    const endTime = slotToTime(toSlot + 1); // +1 because end is exclusive
+    openTimeBlockModal(null, startTime, endTime);
+  }
+
+  function renderTimeBlockSummary(blocks) {
+    const summary = document.getElementById('tb-summary');
+    if (!summary) return;
+    if (blocks.length === 0) {
+      summary.innerHTML = '<h3>今日统计</h3><p style="color:var(--text-muted);font-size:.85rem">暂无数据</p>';
+      return;
+    }
+    const catTotals = {};
+    blocks.forEach(b => {
+      const dur = timeToMinutes(b.end) - timeToMinutes(b.start);
+      if (dur > 0) catTotals[b.category] = (catTotals[b.category] || 0) + dur;
+    });
+    let html = '<h3>今日统计</h3><div class="tb-summary-grid">';
+    for (const [cat, mins] of Object.entries(catTotals).sort((a,b) => b[1] - a[1])) {
+      const info = TB_CATEGORIES[cat] || TB_CATEGORIES.other;
+      const hrs = Math.floor(mins / 60);
+      const m = mins % 60;
+      const timeStr = hrs > 0 ? `${hrs}h${m > 0 ? m + 'm' : ''}` : `${m}m`;
+      html += `<div class="tb-summary-item"><span class="tb-summary-dot" style="background:${info.color}"></span><span class="tb-summary-label">${info.label}</span><span class="tb-summary-val">${timeStr}</span></div>`;
+    }
+    const totalMin = Object.values(catTotals).reduce((s,v) => s+v, 0);
+    const totalH = Math.floor(totalMin / 60);
+    const totalM = totalMin % 60;
+    html += `<div class="tb-summary-item" style="border-color:var(--accent)"><span class="tb-summary-dot" style="background:var(--accent)"></span><span class="tb-summary-label">合计</span><span class="tb-summary-val">${totalH}h${totalM > 0 ? totalM + 'm' : ''}</span></div>`;
+    html += '</div>';
+    summary.innerHTML = html;
+  }
+
+  function openTimeBlockModal(blockId, presetStart, presetEnd) {
+    const overlay = document.getElementById('tb-modal-overlay');
+    const titleEl = document.getElementById('tb-modal-title');
+    const nameInput = document.getElementById('tb-edit-name');
+    const taskSelect = document.getElementById('tb-edit-task');
+    const catSelect = document.getElementById('tb-edit-category');
+    const startInput = document.getElementById('tb-edit-start');
+    const endInput = document.getElementById('tb-edit-end');
+    const deleteBtn = document.getElementById('tb-modal-delete');
+
+    // Populate task select
+    taskSelect.innerHTML = '<option value="">不关联</option>';
+    state.tasks.filter(t => !t.done).forEach(t => {
+      taskSelect.innerHTML += `<option value="${t.id}">${esc(t.name)}</option>`;
+    });
+
+    // Toggle name field visibility based on task selection
+    const nameRow = nameInput.closest('.form-row');
+    function updateNameVisibility() {
+      nameRow.style.display = taskSelect.value ? 'none' : '';
+    }
+    taskSelect.onchange = updateNameVisibility;
+
+    if (blockId) {
+      const block = getTimeBlocks().find(b => b.id === blockId);
+      if (!block) return;
+      editingBlockId = blockId;
+      titleEl.textContent = '编辑时间块';
+      nameInput.value = block.name;
+      taskSelect.value = block.taskId || '';
+      catSelect.value = block.category || 'other';
+      startInput.value = block.start;
+      endInput.value = block.end;
+      deleteBtn.style.display = '';
+    } else {
+      editingBlockId = null;
+      titleEl.textContent = '添加时间块';
+      nameInput.value = '';
+      taskSelect.value = '';
+      catSelect.value = 'work';
+      startInput.value = presetStart || '09:00';
+      endInput.value = presetEnd || '10:00';
+      deleteBtn.style.display = 'none';
+    }
+    updateNameVisibility();
+    overlay.classList.remove('hidden');
+  }
+
+  // Time block modal events
+  const tbModalOverlay = document.getElementById('tb-modal-overlay');
+  setupModalClose(tbModalOverlay, document.getElementById('tb-modal-close'));
+
+  document.getElementById('tb-modal-save').addEventListener('click', () => {
+    let name = document.getElementById('tb-edit-name').value.trim();
+    const taskId = document.getElementById('tb-edit-task').value || null;
+    const category = document.getElementById('tb-edit-category').value;
+    const start = document.getElementById('tb-edit-start').value;
+    const end = document.getElementById('tb-edit-end').value;
+    // If linked to a task, use task name automatically
+    if (taskId) {
+      const linkedTask = state.tasks.find(t => t.id === taskId);
+      name = linkedTask ? linkedTask.name : name;
+    }
+    if (!name || !start || !end) {
+      if (!name) alert('请输入活动名称或关联任务');
+      return;
+    }
+    if (timeToMinutes(end) <= timeToMinutes(start)) {
+      alert('结束时间必须晚于开始时间');
+      return;
+    }
+
+    if (editingBlockId) {
+      const block = getTimeBlocks().find(b => b.id === editingBlockId);
+      if (block) {
+        block.name = name;
+        block.taskId = taskId;
+        block.category = category;
+        block.start = start;
+        block.end = end;
+      }
+    } else {
+      if (!state.timeBlocks) state.timeBlocks = [];
+      state.timeBlocks.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+        date: tbViewDate,
+        name, taskId, category, start, end,
+      });
+    }
+    saveState();
+    tbModalOverlay.classList.add('hidden');
+    renderTimeBlock();
+  });
+
+  document.getElementById('tb-modal-delete').addEventListener('click', () => {
+    if (!editingBlockId) return;
+    if (confirm('删除该时间块？')) {
+      state.timeBlocks = (state.timeBlocks || []).filter(b => b.id !== editingBlockId);
+      saveState();
+      tbModalOverlay.classList.add('hidden');
+      renderTimeBlock();
+    }
+  });
+
+  document.getElementById('tb-add-block').addEventListener('click', () => openTimeBlockModal(null));
+
+  document.getElementById('tb-prev-day').addEventListener('click', () => {
+    const d = new Date(tbViewDate + 'T00:00:00');
+    d.setDate(d.getDate() - 1);
+    tbViewDate = localDateKey(d);
+    renderTimeBlock();
+  });
+
+  document.getElementById('tb-next-day').addEventListener('click', () => {
+    const d = new Date(tbViewDate + 'T00:00:00');
+    d.setDate(d.getDate() + 1);
+    tbViewDate = localDateKey(d);
+    renderTimeBlock();
+  });
+
+  document.getElementById('tb-today-btn').addEventListener('click', () => {
+    tbViewDate = todayKey();
+    renderTimeBlock();
+  });
+
+  // ===== DEMO DATA SEEDING =====
+  function seedDemoData() {
+    if (state.tasks.length > 0) return; // Already has data
+    const today = todayKey();
+    const dm1 = new Date(); dm1.setDate(dm1.getDate() - 1);
+    const dm2 = new Date(); dm2.setDate(dm2.getDate() - 2);
+    const d1 = new Date(); d1.setDate(d1.getDate() + 1);
+    const d2 = new Date(); d2.setDate(d2.getDate() + 2);
+    const d3 = new Date(); d3.setDate(d3.getDate() + 3);
+    const d4 = new Date(); d4.setDate(d4.getDate() + 4);
+    const d5 = new Date(); d5.setDate(d5.getDate() + 5);
+    const d6 = new Date(); d6.setDate(d6.getDate() + 6);
+    const yesterday = localDateKey(dm1), dayBefore = localDateKey(dm2);
+    const day1 = localDateKey(d1), day2 = localDateKey(d2), day3 = localDateKey(d3);
+    const day4 = localDateKey(d4), day5 = localDateKey(d5), day6 = localDateKey(d6);
+
+    // Seed tags
+    state.tags = [
+      { id: 'tag-work', name: '工作', color: '#6366f1' },
+      { id: 'tag-study', name: '学习', color: '#06b6d4' },
+      { id: 'tag-life', name: '生活', color: '#22c55e' },
+      { id: 'tag-health', name: '健康', color: '#f97316' },
+    ];
+
+    state.tasks = [
+      // 前天 (已完成)
+      { id: 'demo-p1', name: '整理项目文档', quadrant: 'important', date: dayBefore, duration: 60, done: true, tags: ['tag-work'], sortOrder: 0 },
+      { id: 'demo-p2', name: '看完 React 教程第5章', quadrant: 'important', date: dayBefore, duration: 50, done: true, tags: ['tag-study'], sortOrder: 1 },
+      // 昨天 (部分完成)
+      { id: 'demo-y1', name: '修复登录页 Bug', quadrant: 'urgent-important', date: yesterday, duration: 45, done: true, tags: ['tag-work'], sortOrder: 2 },
+      { id: 'demo-y2', name: '跑步3公里', quadrant: 'important', date: yesterday, duration: 30, done: true, tags: ['tag-health'], sortOrder: 3 },
+      { id: 'demo-y3', name: '回复合作方邮件', quadrant: 'urgent', date: yesterday, duration: 20, done: false, tags: ['tag-work'], sortOrder: 4 },
+      // 今天
+      { id: 'demo1', name: '完成周报', quadrant: 'urgent-important', date: today, duration: 60, done: false, tags: ['tag-work'], sortOrder: 5 },
+      { id: 'demo2', name: '回复客户邮件', quadrant: 'urgent', date: today, duration: 30, done: false, tags: ['tag-work'], sortOrder: 6 },
+      { id: 'demo3', name: '阅读《原则》第三章', quadrant: 'important', date: today, duration: 45, done: false, tags: ['tag-study'], sortOrder: 7 },
+      { id: 'demo4', name: '去超市买菜', quadrant: 'neither', date: today, duration: 40, done: false, tags: ['tag-life'], sortOrder: 8 },
+      // 明天
+      { id: 'demo5', name: '准备项目方案PPT', quadrant: 'urgent-important', date: day1, duration: 120, done: false, tags: ['tag-work'], sortOrder: 9 },
+      { id: 'demo6', name: '团队周会', quadrant: 'urgent', date: day1, duration: 60, done: false, tags: ['tag-work'], sortOrder: 10 },
+      { id: 'demo7', name: '游泳1小时', quadrant: 'important', date: day1, duration: 60, done: false, tags: ['tag-health'], sortOrder: 11 },
+      // 后天
+      { id: 'demo8', name: '学习 TypeScript 基础', quadrant: 'important', date: day2, duration: 90, done: false, tags: ['tag-study'], sortOrder: 12 },
+      { id: 'demo9', name: '整理书桌', quadrant: 'neither', date: day2, duration: 30, done: false, tags: ['tag-life'], sortOrder: 13 },
+      // +3
+      { id: 'demo10', name: '约牙医检查', quadrant: 'neither', date: day3, duration: 60, done: false, tags: ['tag-health'], sortOrder: 14 },
+      { id: 'demo11', name: '跑步5公里', quadrant: 'important', date: day3, duration: 40, done: false, tags: ['tag-health'], sortOrder: 15 },
+      // +4
+      { id: 'demo12', name: '提交代码审查', quadrant: 'urgent-important', date: day4, duration: 45, done: false, tags: ['tag-work'], sortOrder: 16 },
+      { id: 'demo13', name: '看纪录片', quadrant: 'neither', date: day4, duration: 90, done: false, tags: ['tag-life'], sortOrder: 17 },
+      // +5 ~ +6
+      { id: 'demo14', name: '写技术博客', quadrant: 'important', date: day5, duration: 90, done: false, tags: ['tag-study'], sortOrder: 18 },
+      { id: 'demo15', name: '采购日用品', quadrant: 'neither', date: day6, duration: 30, done: false, tags: ['tag-life'], sortOrder: 19 },
+    ];
+
+    // Seed time blocks — today full day, yesterday partial
+    state.timeBlocks = [
+      // 昨天
+      { id: 'tb-y1', date: yesterday, name: '修复Bug', taskId: 'demo-y1', category: 'work', start: '09:00', end: '10:30' },
+      { id: 'tb-y2', date: yesterday, name: '跑步', taskId: 'demo-y2', category: 'exercise', start: '17:00', end: '17:30' },
+      { id: 'tb-y3', date: yesterday, name: '看视频教程', taskId: null, category: 'study', start: '20:00', end: '21:30' },
+      // 今天 — 丰富的一天
+      { id: 'tb1', date: today, name: '晨间阅读', taskId: 'demo3', category: 'study', start: '07:30', end: '08:00' },
+      { id: 'tb2', date: today, name: '通勤', taskId: null, category: 'commute', start: '08:00', end: '08:30' },
+      { id: 'tb3', date: today, name: '处理邮件', taskId: 'demo2', category: 'work', start: '09:00', end: '09:30' },
+      { id: 'tb4', date: today, name: '写周报', taskId: 'demo1', category: 'work', start: '09:30', end: '11:00' },
+      { id: 'tb5', date: today, name: '午休', taskId: null, category: 'rest', start: '12:00', end: '13:00' },
+      { id: 'tb6', date: today, name: '项目开发', taskId: null, category: 'work', start: '13:30', end: '15:30' },
+      { id: 'tb7', date: today, name: '买菜', taskId: 'demo4', category: 'life', start: '17:00', end: '18:00' },
+      { id: 'tb8', date: today, name: '读书', taskId: null, category: 'study', start: '20:00', end: '21:00' },
+    ];
+
+    saveState();
+  }
+
   // ===== INIT =====
   // Global touch event listeners for mobile drag
   document.addEventListener('touchmove', handleTouchMove, { passive: false });
   document.addEventListener('touchend', handleTouchEnd);
+
+  // Seed demo data if empty
+  seedDemoData();
 
   // 先用本地数据渲染（避免白屏），然后异步加载服务端数据覆盖
   loadSettingsUI();
