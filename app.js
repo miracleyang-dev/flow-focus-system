@@ -49,6 +49,7 @@
     if (!Array.isArray(merged.shopItems)) merged.shopItems = null; // will be initialized with defaults on first access
     if (!Array.isArray(merged.shopHistory)) merged.shopHistory = [];
     if (!Array.isArray(merged.timeBlocks)) merged.timeBlocks = [];
+    if (!merged.wakeSleep) merged.wakeSleep = {};
     // Migrate tasks: category -> tags
     migrateTasks(merged);
     return merged;
@@ -1511,6 +1512,24 @@
 
     let ctx = `总结范围: ${d.startKey} 至 ${d.today} (${days} 天)\n\n`;
 
+    // Wake/Sleep data
+    const wakeSleepEntries = [];
+    for (let i = 0; i < days; i++) {
+      const date = new Date(d.today + 'T00:00:00');
+      date.setDate(date.getDate() - (days - 1 - i));
+      const dk = localDateKey(date);
+      const ws = getWakeSleep(dk);
+      if (ws.wake || ws.sleep) {
+        const parts = [];
+        if (ws.wake) parts.push('起床 ' + ws.wake);
+        if (ws.sleep) parts.push('睡觉 ' + ws.sleep);
+        wakeSleepEntries.push(`${dk}: ${parts.join(', ')}`);
+      }
+    }
+    if (wakeSleepEntries.length > 0) {
+      ctx += `【起床/睡觉记录】\n${wakeSleepEntries.join('\n')}\n`;
+    }
+
     ctx += `【任务完成情况】\n`;
     if (d.taskLogs.length > 0) {
       ctx += `完成任务数: ${d.taskLogs.length} 个\n`;
@@ -1590,12 +1609,21 @@
             dayTotal += dur;
           }
         });
-        const catLabels = { work:'工作', study:'学习', exercise:'运动', rest:'休息', life:'生活', commute:'通勤', other:'其他' };
+        const catLabels = { daily:'日常', fun:'娱乐', untracked:'未记录', work:'工作', study:'学习', exercise:'运动', rest:'休息', life:'生活', commute:'通勤', other:'其他' };
         const catStr = Object.entries(catTotals).map(([c, m]) => `${catLabels[c]||c} ${Math.floor(m/60)}h${m%60>0?m%60+'m':''}`).join(', ');
         ctx += `  ${date}: 共记录 ${Math.floor(dayTotal/60)}h${dayTotal%60>0?dayTotal%60+'m':''} (${catStr})\n`;
         dayBlocks.forEach(b => {
           const displayName = b.taskId ? ((state.tasks.find(t => t.id === b.taskId) || {}).name || b.name) : b.name;
-          ctx += `    ${b.start}-${b.end} ${displayName} [${catLabels[b.category]||b.category}]\n`;
+          const bindInfo = [];
+          if (b.bindType === 'task' && b.bindId) {
+            const t = state.tasks.find(x => x.id === b.bindId);
+            if (t) bindInfo.push('绑定任务:' + t.name);
+          } else if (b.bindType === 'habit' && b.bindId) {
+            const h = getHabits().find(x => x.id === b.bindId);
+            if (h) bindInfo.push('绑定习惯:' + h.name);
+          }
+          const bindStr = bindInfo.length > 0 ? ' [' + bindInfo.join(', ') + ']' : '';
+          ctx += `    ${b.start}-${b.end} ${displayName} [${catLabels[b.category]||b.category}]${bindStr}\n`;
         });
       });
     }
@@ -1607,6 +1635,25 @@
     const d = extractSummaryData(days);
 
     let html = '';
+
+    // Wake/Sleep overview
+    const wsDates = [];
+    for (let i = 0; i < days; i++) {
+      const date = new Date(d.today + 'T00:00:00');
+      date.setDate(date.getDate() - (days - 1 - i));
+      const dk = localDateKey(date);
+      const ws = getWakeSleep(dk);
+      if (ws.wake || ws.sleep) {
+        const parts = [];
+        if (ws.wake) parts.push('\uD83C\uDF05 ' + ws.wake);
+        if (ws.sleep) parts.push('\uD83C\uDF19 ' + ws.sleep);
+        wsDates.push(`<li>${dk}: ${parts.join(', ')}</li>`);
+      }
+    }
+    if (wsDates.length > 0) {
+      html += `<div class="summary-section"><h4>⏰ 起床/睡觉记录</h4><ul>${wsDates.join('')}</ul></div>`;
+    }
+
     html += `<div class="summary-section"><h4>📊 数据概览 (${d.startKey} ~ ${d.today})</h4><ul>`;
     html += `<li>完成任务: <strong>${d.taskCount}</strong> 个</li>`;
     html += `<li>待完成任务: <strong>${d.pendingTasks.length}</strong> 个</li>`;
@@ -1676,7 +1723,7 @@
     // Time blocks
     if (d.timeBlocksInRange.length > 0) {
       html += `<div class="summary-section"><h4>⏱ 时间记录</h4><ul>`;
-      const catLabels = { work:'工作', study:'学习', exercise:'运动', rest:'休息', life:'生活', commute:'通勤', other:'其他' };
+      const catLabels = { daily:'日常', fun:'娱乐', untracked:'未记录', work:'工作', study:'学习', exercise:'运动', rest:'休息', life:'生活', commute:'通勤', other:'其他' };
       const tbCatTotals = {};
       d.timeBlocksInRange.forEach(b => {
         const dur = timeToMinutes(b.end) - timeToMinutes(b.start);
@@ -1686,6 +1733,23 @@
         const hrs = Math.floor(mins/60);
         const m = mins % 60;
         html += `<li>${catLabels[cat]||cat}: ${hrs > 0 ? hrs+'h':''}${m>0?m+'m':''}</li>`;
+      }
+      // Show binding info
+      const boundBlocks = d.timeBlocksInRange.filter(b => b.bindType && b.bindType !== 'none');
+      if (boundBlocks.length > 0) {
+        html += `<li style="margin-top:.3rem;border-top:1px solid var(--border-subtle);padding-top:.3rem">绑定记录: ${boundBlocks.length} 条`;
+        boundBlocks.forEach(b => {
+          let bindInfo = '';
+          if (b.bindType === 'task' && b.bindId) {
+            const t = state.tasks.find(x => x.id === b.bindId);
+            bindInfo = t ? `\uD83D\uDCCB ${esc(t.name)}` : '';
+          } else if (b.bindType === 'habit' && b.bindId) {
+            const h = getHabits().find(x => x.id === b.bindId);
+            bindInfo = h ? `\u2705 ${esc(h.name)}` : '';
+          }
+          if (bindInfo) html += `<br>&nbsp;&nbsp;${b.start}-${b.end} ${esc(b.name)} → ${bindInfo}`;
+        });
+        html += `</li>`;
       }
       html += `</ul></div>`;
     }
@@ -1724,12 +1788,12 @@
 
     try {
       const ctx = buildSummaryContext(days);
-      const sysPrompt = `你是"心流"效率系统的总结助手。根据用户近段时间的任务、习惯和时间记录数据，生成一份简洁有力的总结分析。
+      const sysPrompt = `你是"心流"效率系统的总结助手。根据用户近段时间的任务、习惯、时间记录和起居数据，生成一份简洁有力的总结分析。
 
 要求：
 1. 总结完成情况，指出亮点
-2. 分析时间分配是否合理（基于时间记录数据，如工作/学习/休息占比）
-3. 分析存在的问题（逾期、习惯中断、时间碎片化等）
+2. 分析作息规律性（基于起床/睡觉时间记录），分析时间分配是否合理（基于时间记录数据，如日常/娱乐占比）
+3. 分析存在的问题（逾期、习惯中断、时间碎片化、作息不规律等）
 4. 给出具体可行的改进建议（2-3条）
 5. 整体鼓励，语气温暖务实
 6. 总字数控制在 250 字以内
@@ -2632,19 +2696,75 @@
   });
 
   // ===== TIME BLOCK VIEW =====
+  // Base categories: 日常、娱乐、未记录 (user-configurable preset)
+  // Legacy categories kept for backward compatibility with existing data
   const TB_CATEGORIES = {
-    work: { label: '工作', color: '#6366f1' },
-    study: { label: '学习', color: '#06b6d4' },
+    daily:    { label: '日常', color: '#7c9a6e' },
+    fun:      { label: '娱乐', color: '#e07a5f' },
+    untracked:{ label: '未记录', color: '#8899a6' },
+    // Legacy (for existing data compatibility)
+    work:     { label: '工作', color: '#6366f1' },
+    study:    { label: '学习', color: '#06b6d4' },
     exercise: { label: '运动', color: '#22c55e' },
-    rest: { label: '休息', color: '#eab308' },
-    life: { label: '生活', color: '#f97316' },
-    commute: { label: '通勤', color: '#8b5cf6' },
-    other: { label: '其他', color: '#64748b' },
+    rest:     { label: '休息', color: '#eab308' },
+    life:     { label: '生活', color: '#f97316' },
+    commute:  { label: '通勤', color: '#8b5cf6' },
+    other:    { label: '其他', color: '#64748b' },
+  };
+  // Primary categories shown in the selection modal
+  const TB_PRIMARY_CATS = ['daily', 'fun', 'untracked'];
+  // Bind types
+  const TB_BIND_TYPES = {
+    none:  { label: '不关联', icon: '⊘' },
+    task:  { label: '任务',   icon: '\uD83D\uDCCB' },
+    habit: { label: '打卡',   icon: '\u2705' },
   };
   let tbViewDate = todayKey();
   let editingBlockId = null;
 
+  // Temp state for the category/binding selection modal
+  let tbCatBindState = { category: null, bindType: null, bindId: null };
+
   function getTimeBlocks() { return state.timeBlocks || []; }
+
+  // Wake/Sleep time: stored in state as { wakeSleep: { 'YYYY-MM-DD': { wake: 'HH:MM', sleep: 'HH:MM' } } }
+  function getWakeSleep(date) {
+    if (!state.wakeSleep) state.wakeSleep = {};
+    return state.wakeSleep[date] || { wake: '', sleep: '' };
+  }
+  function setWakeSleep(date, wake, sleep) {
+    if (!state.wakeSleep) state.wakeSleep = {};
+    state.wakeSleep[date] = { wake, sleep };
+    saveState();
+  }
+  function renderWakeSleepUI() {
+    const ws = getWakeSleep(tbViewDate);
+    const wakeInput = document.getElementById('tb-wake-time');
+    const sleepInput = document.getElementById('tb-sleep-time');
+    const summary = document.getElementById('tb-sleep-summary');
+    if (wakeInput) wakeInput.value = ws.wake;
+    if (sleepInput) sleepInput.value = ws.sleep;
+    // Show sleep duration summary
+    if (summary) {
+      if (ws.wake && ws.sleep) {
+        let sleepMin = timeToMinutes(ws.sleep);
+        let wakeMin = timeToMinutes(ws.wake);
+        // Handle crossing midnight
+        if (sleepMin > wakeMin) sleepMin -= 24 * 60;
+        let duration = wakeMin - sleepMin;
+        if (duration < 0) duration += 24 * 60;
+        const h = Math.floor(duration / 60);
+        const m = duration % 60;
+        summary.textContent = '睡眠 ' + (h > 0 ? h + 'h' : '') + (m > 0 ? m + 'm' : '');
+      } else if (ws.wake) {
+        summary.textContent = '起床 ' + ws.wake;
+      } else if (ws.sleep) {
+        summary.textContent = '睡觉 ' + ws.sleep;
+      } else {
+        summary.textContent = '';
+      }
+    }
+  }
 
   // Convert "HH:MM" to minutes from midnight
   function timeToMinutes(t) {
@@ -2674,6 +2794,9 @@
       const isToday = tbViewDate === todayKey();
       dateLabel.textContent = `${d.getMonth()+1}月${d.getDate()}日 周${weekNames[d.getDay()]}${isToday ? '（今天）' : ''}`;
     }
+
+    // Render wake/sleep UI
+    renderWakeSleepUI();
 
     const timeline = document.getElementById('tb-timeline');
     const blocks = getTimeBlocks().filter(b => b.date === tbViewDate).sort((a,b) => a.start.localeCompare(b.start));
@@ -2858,13 +2981,23 @@
       return;
     }
     const catTotals = {};
+    const bindInfo = [];
     blocks.forEach(b => {
       const dur = timeToMinutes(b.end) - timeToMinutes(b.start);
       if (dur > 0) catTotals[b.category] = (catTotals[b.category] || 0) + dur;
+      if (b.bindType && b.bindType !== 'none') {
+        if (b.bindType === 'task' && b.bindId) {
+          const t = state.tasks.find(x => x.id === b.bindId);
+          if (t) bindInfo.push({ name: t.name, icon: '\uD83D\uDCCB', color: '#6366f1', time: b.start + '-' + b.end });
+        } else if (b.bindType === 'habit' && b.bindId) {
+          const h = getHabits().find(x => x.id === b.bindId);
+          if (h) bindInfo.push({ name: h.name, icon: h.icon || '\u2705', color: '#22c55e', time: b.start + '-' + b.end });
+        }
+      }
     });
     let html = '<h3>今日统计</h3><div class="tb-summary-grid">';
     for (const [cat, mins] of Object.entries(catTotals).sort((a,b) => b[1] - a[1])) {
-      const info = TB_CATEGORIES[cat] || TB_CATEGORIES.other;
+      const info = TB_CATEGORIES[cat] || TB_CATEGORIES.daily;
       const hrs = Math.floor(mins / 60);
       const m = mins % 60;
       const timeStr = hrs > 0 ? `${hrs}h${m > 0 ? m + 'm' : ''}` : `${m}m`;
@@ -2875,6 +3008,16 @@
     const totalM = totalMin % 60;
     html += `<div class="tb-summary-item" style="border-color:var(--accent)"><span class="tb-summary-dot" style="background:var(--accent)"></span><span class="tb-summary-label">合计</span><span class="tb-summary-val">${totalH}h${totalM > 0 ? totalM + 'm' : ''}</span></div>`;
     html += '</div>';
+
+    // Binding info section
+    if (bindInfo.length > 0) {
+      html += '<h3 style="margin-top:.8rem">绑定记录</h3><div class="tb-summary-grid">';
+      bindInfo.forEach(bi => {
+        html += `<div class="tb-summary-item"><span class="tb-summary-dot" style="background:${bi.color}"></span><span class="tb-summary-label">${bi.icon} ${esc(bi.name)}</span><span class="tb-summary-val">${bi.time}</span></div>`;
+      });
+      html += '</div>';
+    }
+
     summary.innerHTML = html;
   }
 
@@ -2883,7 +3026,6 @@
     const titleEl = document.getElementById('tb-modal-title');
     const nameInput = document.getElementById('tb-edit-name');
     const taskSelect = document.getElementById('tb-edit-task');
-    const catSelect = document.getElementById('tb-edit-category');
     const startInput = document.getElementById('tb-edit-start');
     const endInput = document.getElementById('tb-edit-end');
     const deleteBtn = document.getElementById('tb-modal-delete');
@@ -2908,23 +3050,72 @@
       titleEl.textContent = '编辑时间块';
       nameInput.value = block.name;
       taskSelect.value = block.taskId || '';
-      catSelect.value = block.category || 'other';
       startInput.value = block.start;
       endInput.value = block.end;
       deleteBtn.style.display = '';
+
+      // Restore bind info
+      const bindType = block.bindType || 'none';
+      const bindId = block.bindId || null;
+      const category = block.category || 'daily';
+      updateCatBindDisplay(category, bindType, bindId);
     } else {
       editingBlockId = null;
       titleEl.textContent = '添加时间块';
       nameInput.value = '';
       taskSelect.value = '';
-      catSelect.value = 'work';
       startInput.value = presetStart || '09:00';
       endInput.value = presetEnd || '10:00';
       deleteBtn.style.display = 'none';
+
+      // Default: daily category, no binding
+      updateCatBindDisplay('daily', 'none', null);
     }
     updateNameVisibility();
     overlay.classList.remove('hidden');
   }
+
+  // Update the category button and bind display in the time block form
+  function updateCatBindDisplay(category, bindType, bindId) {
+    const cat = TB_CATEGORIES[category] || TB_CATEGORIES.daily;
+    const catDot = document.getElementById('tb-cat-dot');
+    const catLabel = document.getElementById('tb-cat-label');
+    const bindDisplay = document.getElementById('tb-bind-display');
+    const bindTag = document.getElementById('tb-bind-tag');
+
+    if (catDot) catDot.style.background = cat.color;
+    if (catLabel) catLabel.textContent = cat.label;
+
+    if (bindType && bindType !== 'none') {
+      if (bindDisplay) {
+        bindDisplay.style.display = 'flex';
+        const bt = TB_BIND_TYPES[bindType];
+        let label = bt ? bt.icon + ' ' + bt.label : '';
+        if (bindType === 'task' && bindId) {
+          const t = state.tasks.find(x => x.id === bindId);
+          if (t) label = '\uD83D\uDCCB ' + esc(t.name);
+        } else if (bindType === 'habit' && bindId) {
+          const h = getHabits().find(x => x.id === bindId);
+          if (h) label = '\u2705 ' + esc(h.name);
+        }
+        if (bindTag) bindTag.textContent = label;
+      }
+    } else {
+      if (bindDisplay) bindDisplay.style.display = 'none';
+    }
+  }
+
+  // Category bind button -> open selection modal
+  document.getElementById('tb-cat-btn').addEventListener('click', () => {
+    openCatBindModal();
+  });
+
+  // Bind clear button
+  document.getElementById('tb-bind-clear').addEventListener('click', () => {
+    tbCatBindState.bindType = 'none';
+    tbCatBindState.bindId = null;
+    updateCatBindDisplay(tbCatBindState.category || 'daily', 'none', null);
+  });
 
   // Time block modal events
   const tbModalOverlay = document.getElementById('tb-modal-overlay');
@@ -2933,7 +3124,6 @@
   document.getElementById('tb-modal-save').addEventListener('click', () => {
     let name = document.getElementById('tb-edit-name').value.trim();
     const taskId = document.getElementById('tb-edit-task').value || null;
-    const category = document.getElementById('tb-edit-category').value;
     const start = document.getElementById('tb-edit-start').value;
     const end = document.getElementById('tb-edit-end').value;
     // If linked to a task, use task name automatically
@@ -2941,8 +3131,12 @@
       const linkedTask = state.tasks.find(t => t.id === taskId);
       name = linkedTask ? linkedTask.name : name;
     }
-    if (!name || !start || !end) {
-      if (!name) alert('请输入活动名称或关联任务');
+    if (!name && !taskId) {
+      alert('请输入活动名称或关联任务');
+      return;
+    }
+    if (!start || !end) {
+      alert('请填写开始和结束时间');
       return;
     }
     if (timeToMinutes(end) <= timeToMinutes(start)) {
@@ -2950,12 +3144,18 @@
       return;
     }
 
+    const category = tbCatBindState.category || 'daily';
+    const bindType = tbCatBindState.bindType || 'none';
+    const bindId = tbCatBindState.bindId || null;
+
     if (editingBlockId) {
       const block = getTimeBlocks().find(b => b.id === editingBlockId);
       if (block) {
-        block.name = name;
+        block.name = name || '-';
         block.taskId = taskId;
         block.category = category;
+        block.bindType = bindType;
+        block.bindId = bindId;
         block.start = start;
         block.end = end;
       }
@@ -2964,7 +3164,7 @@
       state.timeBlocks.push({
         id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
         date: tbViewDate,
-        name, taskId, category, start, end,
+        name: name || '-', taskId, category, bindType, bindId, start, end,
       });
     }
     saveState();
@@ -3001,6 +3201,153 @@
   document.getElementById('tb-today-btn').addEventListener('click', () => {
     tbViewDate = todayKey();
     renderTimeBlock();
+  });
+
+  // Wake/Sleep time inputs
+  document.getElementById('tb-wake-time').addEventListener('change', function() {
+    const ws = getWakeSleep(tbViewDate);
+    ws.wake = this.value;
+    setWakeSleep(tbViewDate, ws.wake, ws.sleep);
+    renderWakeSleepUI();
+  });
+  document.getElementById('tb-sleep-time').addEventListener('change', function() {
+    const ws = getWakeSleep(tbViewDate);
+    ws.sleep = this.value;
+    setWakeSleep(tbViewDate, ws.wake, ws.sleep);
+    renderWakeSleepUI();
+  });
+
+  // ===== CATEGORY & BINDING SELECTION MODAL =====
+  const catBindOverlay = document.getElementById('tb-catbind-overlay');
+  setupModalClose(catBindOverlay, document.getElementById('tb-catbind-close'));
+
+  function openCatBindModal() {
+    // Initialize from current time block state
+    const existingCat = tbCatBindState.category || 'daily';
+    const existingBindType = tbCatBindState.bindType || 'none';
+    const existingBindId = tbCatBindState.bindId || null;
+
+    tbCatBindState = { category: existingCat, bindType: existingBindType, bindId: existingBindId };
+
+    renderCatGrid();
+    renderBindTypeList();
+    renderBindTargetList();
+
+    catBindOverlay.classList.remove('hidden');
+  }
+
+  function renderCatGrid() {
+    const grid = document.getElementById('tb-cat-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    TB_PRIMARY_CATS.forEach(catKey => {
+      const cat = TB_CATEGORIES[catKey];
+      const el = document.createElement('div');
+      el.className = 'tb-cat-item' + (tbCatBindState.category === catKey ? ' selected' : '');
+      el.style.color = cat.color;
+      el.dataset.cat = catKey;
+      el.innerHTML = `<span class="tb-cat-item-dot" style="background:${cat.color}"></span><span class="tb-cat-item-label">${cat.label}</span>`;
+      el.addEventListener('click', () => {
+        tbCatBindState.category = catKey;
+        renderCatGrid();
+      });
+      grid.appendChild(el);
+    });
+  }
+
+  function renderBindTypeList() {
+    const list = document.getElementById('tb-bind-type-list');
+    if (!list) return;
+    list.querySelectorAll('.tb-bind-type-item').forEach(el => {
+      const bt = el.dataset.bind;
+      el.classList.toggle('selected', tbCatBindState.bindType === bt);
+    });
+    // Show/hide target section based on bind type
+    const targetSection = document.getElementById('tb-bind-target-section');
+    if (targetSection) {
+      targetSection.style.display = (tbCatBindState.bindType === 'none') ? 'none' : '';
+    }
+  }
+
+  function renderBindTargetList() {
+    const list = document.getElementById('tb-bind-target-list');
+    const title = document.getElementById('tb-bind-target-title');
+    if (!list) return;
+
+    if (tbCatBindState.bindType === 'task') {
+      if (title) title.textContent = '选择任务';
+      const activeTasks = state.tasks.filter(t => !t.done);
+      list.innerHTML = '';
+      if (activeTasks.length === 0) {
+        list.innerHTML = '<div style="color:var(--text-muted);font-size:.82rem;padding:.5rem">暂无活跃任务</div>';
+        return;
+      }
+      activeTasks.forEach(t => {
+        const el = document.createElement('div');
+        el.className = 'tb-bind-target-item' + (tbCatBindState.bindId === t.id ? ' selected' : '');
+        el.dataset.id = t.id;
+        el.innerHTML = `<span class="tbti-icon">\uD83D\uDCCB</span><span class="tbti-name">${esc(t.name)}</span><span class="tbti-meta">${PRIORITY_LABELS[t.quadrant] || ''}</span>`;
+        el.addEventListener('click', () => {
+          tbCatBindState.bindId = t.id;
+          renderBindTargetList();
+        });
+        list.appendChild(el);
+      });
+    } else if (tbCatBindState.bindType === 'habit') {
+      if (title) title.textContent = '选择习惯';
+      const habits = getHabits();
+      list.innerHTML = '';
+      if (habits.length === 0) {
+        list.innerHTML = '<div style="color:var(--text-muted);font-size:.82rem;padding:.5rem">暂无习惯，请先在「长期习惯」中添加</div>';
+        return;
+      }
+      habits.forEach(h => {
+        const el = document.createElement('div');
+        el.className = 'tb-bind-target-item' + (tbCatBindState.bindId === h.id ? ' selected' : '');
+        el.dataset.id = h.id;
+        el.innerHTML = `<span class="tbti-icon">${h.icon || '\uD83D\uDD04'}</span><span class="tbti-name">${esc(h.name)}</span><span class="tbti-meta">${h.type === 'duration' ? '时长' : '次数'}</span>`;
+        el.addEventListener('click', () => {
+          tbCatBindState.bindId = h.id;
+          renderBindTargetList();
+        });
+        list.appendChild(el);
+      });
+    } else {
+      list.innerHTML = '';
+    }
+  }
+
+  // Bind type item clicks
+  document.getElementById('tb-bind-type-list').addEventListener('click', (e) => {
+    const item = e.target.closest('.tb-bind-type-item');
+    if (!item) return;
+    const bt = item.dataset.bind;
+    tbCatBindState.bindType = bt;
+    // Reset bindId when switching type
+    if (bt === 'none') tbCatBindState.bindId = null;
+    renderBindTypeList();
+    renderBindTargetList();
+  });
+
+  // Save from catbind modal
+  document.getElementById('tb-catbind-save').addEventListener('click', () => {
+    if (!tbCatBindState.category) {
+      alert('请选择一个类别');
+      return;
+    }
+    // Auto-set bindId to taskId if bindType is task and bindId not set
+    if (tbCatBindState.bindType === 'task' && !tbCatBindState.bindId) {
+      // No specific task selected, set bindType to none
+      tbCatBindState.bindType = 'none';
+    }
+    if (tbCatBindState.bindType === 'habit' && !tbCatBindState.bindId) {
+      tbCatBindState.bindType = 'none';
+    }
+
+    // Update the form display
+    updateCatBindDisplay(tbCatBindState.category, tbCatBindState.bindType, tbCatBindState.bindId);
+
+    catBindOverlay.classList.add('hidden');
   });
 
   // ===== DEMO DATA SEEDING =====
@@ -3061,19 +3408,25 @@
     // Seed time blocks — today full day, yesterday partial
     state.timeBlocks = [
       // 昨天
-      { id: 'tb-y1', date: yesterday, name: '修复Bug', taskId: 'demo-y1', category: 'work', start: '09:00', end: '10:30' },
-      { id: 'tb-y2', date: yesterday, name: '跑步', taskId: 'demo-y2', category: 'exercise', start: '17:00', end: '17:30' },
-      { id: 'tb-y3', date: yesterday, name: '看视频教程', taskId: null, category: 'study', start: '20:00', end: '21:30' },
+      { id: 'tb-y1', date: yesterday, name: '修复Bug', taskId: 'demo-y1', category: 'daily', bindType: 'task', bindId: 'demo-y1', start: '09:00', end: '10:30' },
+      { id: 'tb-y2', date: yesterday, name: '跑步', taskId: 'demo-y2', category: 'fun', bindType: 'task', bindId: 'demo-y2', start: '17:00', end: '17:30' },
+      { id: 'tb-y3', date: yesterday, name: '看视频教程', taskId: null, category: 'fun', bindType: 'none', bindId: null, start: '20:00', end: '21:30' },
       // 今天 — 丰富的一天
-      { id: 'tb1', date: today, name: '晨间阅读', taskId: 'demo3', category: 'study', start: '07:30', end: '08:00' },
-      { id: 'tb2', date: today, name: '通勤', taskId: null, category: 'commute', start: '08:00', end: '08:30' },
-      { id: 'tb3', date: today, name: '处理邮件', taskId: 'demo2', category: 'work', start: '09:00', end: '09:30' },
-      { id: 'tb4', date: today, name: '写周报', taskId: 'demo1', category: 'work', start: '09:30', end: '11:00' },
-      { id: 'tb5', date: today, name: '午休', taskId: null, category: 'rest', start: '12:00', end: '13:00' },
-      { id: 'tb6', date: today, name: '项目开发', taskId: null, category: 'work', start: '13:30', end: '15:30' },
-      { id: 'tb7', date: today, name: '买菜', taskId: 'demo4', category: 'life', start: '17:00', end: '18:00' },
-      { id: 'tb8', date: today, name: '读书', taskId: null, category: 'study', start: '20:00', end: '21:00' },
+      { id: 'tb1', date: today, name: '晨间阅读', taskId: 'demo3', category: 'daily', bindType: 'task', bindId: 'demo3', start: '07:30', end: '08:00' },
+      { id: 'tb2', date: today, name: '通勤', taskId: null, category: 'daily', bindType: 'none', bindId: null, start: '08:00', end: '08:30' },
+      { id: 'tb3', date: today, name: '处理邮件', taskId: 'demo2', category: 'daily', bindType: 'task', bindId: 'demo2', start: '09:00', end: '09:30' },
+      { id: 'tb4', date: today, name: '写周报', taskId: 'demo1', category: 'daily', bindType: 'task', bindId: 'demo1', start: '09:30', end: '11:00' },
+      { id: 'tb5', date: today, name: '午休', taskId: null, category: 'fun', bindType: 'none', bindId: null, start: '12:00', end: '13:00' },
+      { id: 'tb6', date: today, name: '项目开发', taskId: null, category: 'daily', bindType: 'none', bindId: null, start: '13:30', end: '15:30' },
+      { id: 'tb7', date: today, name: '买菜', taskId: 'demo4', category: 'daily', bindType: 'task', bindId: 'demo4', start: '17:00', end: '18:00' },
+      { id: 'tb8', date: today, name: '读书', taskId: null, category: 'fun', bindType: 'none', bindId: null, start: '20:00', end: '21:00' },
     ];
+
+    // Seed wake/sleep data
+    state.wakeSleep = {
+      [yesterday]: { wake: '07:30', sleep: '23:00' },
+      [today]:     { wake: '07:00', sleep: '' },
+    };
 
     saveState();
   }

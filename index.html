@@ -177,6 +177,22 @@
       <h1>时间记录</h1>
       <p class="view-desc">记录每个时间块的用途，可视化你的一天。</p>
     </div>
+
+    <!-- 起床/睡觉时间录入 -->
+    <div class="tb-sleep-tracker" id="tb-sleep-tracker">
+      <div class="tb-sleep-card">
+        <span class="tb-sleep-icon">🌅</span>
+        <span class="tb-sleep-label">起床</span>
+        <input type="time" id="tb-wake-time" class="tb-sleep-input" title="起床时间">
+      </div>
+      <div class="tb-sleep-card">
+        <span class="tb-sleep-icon">🌙</span>
+        <span class="tb-sleep-label">睡觉</span>
+        <input type="time" id="tb-sleep-time" class="tb-sleep-input" title="睡觉时间">
+      </div>
+      <div class="tb-sleep-summary" id="tb-sleep-summary"></div>
+    </div>
+
     <div class="tb-controls">
       <div class="tb-date-nav">
         <button id="tb-prev-day" class="btn-icon" title="前一天"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><polyline points="15 18 9 12 15 6"/></svg></button>
@@ -219,15 +235,16 @@
         </div>
         <div class="form-row">
           <label>类别</label>
-          <select id="tb-edit-category">
-            <option value="work">工作</option>
-            <option value="study">学习</option>
-            <option value="exercise">运动</option>
-            <option value="rest">休息</option>
-            <option value="life">生活</option>
-            <option value="commute">通勤</option>
-            <option value="other">其他</option>
-          </select>
+          <div class="tb-cat-bind-row">
+            <button type="button" id="tb-cat-btn" class="tb-cat-btn" title="点击选择类别和绑定">
+              <span class="tb-cat-dot" id="tb-cat-dot"></span>
+              <span id="tb-cat-label">选择类别</span>
+            </button>
+            <div class="tb-bind-display" id="tb-bind-display" style="display:none">
+              <span class="tb-bind-tag" id="tb-bind-tag"></span>
+              <button type="button" id="tb-bind-clear" class="tb-bind-clear" title="清除绑定">&times;</button>
+            </div>
+          </div>
         </div>
         <div class="form-row">
           <label>开始时间</label>
@@ -241,6 +258,53 @@
       <div class="modal-footer">
         <button id="tb-modal-delete" class="btn-danger" style="display:none">删除</button>
         <button id="tb-modal-save" class="btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CATEGORY & BINDING SELECTION MODAL -->
+  <div id="tb-catbind-overlay" class="modal-overlay hidden">
+    <div class="modal tb-catbind-modal">
+      <div class="modal-header">
+        <h2>选择类别与绑定</h2>
+        <button class="modal-close" id="tb-catbind-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Step 1: Category selection -->
+        <div class="tb-catbind-section">
+          <h4 class="tb-catbind-section-title">1. 选择类别</h4>
+          <div class="tb-cat-grid" id="tb-cat-grid">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+        <!-- Step 2: Bind type selection -->
+        <div class="tb-catbind-section" id="tb-bind-section">
+          <h4 class="tb-catbind-section-title">2. 绑定类型</h4>
+          <div class="tb-bind-type-list" id="tb-bind-type-list">
+            <div class="tb-bind-type-item" data-bind="none">
+              <span class="tb-bind-type-icon">⊘</span>
+              <span class="tb-bind-type-label">不关联</span>
+            </div>
+            <div class="tb-bind-type-item" data-bind="task">
+              <span class="tb-bind-type-icon">📋</span>
+              <span class="tb-bind-type-label">任务</span>
+            </div>
+            <div class="tb-bind-type-item" data-bind="habit">
+              <span class="tb-bind-type-icon">✅</span>
+              <span class="tb-bind-type-label">打卡</span>
+            </div>
+          </div>
+        </div>
+        <!-- Step 3: Task/Habit selection (dynamic) -->
+        <div class="tb-catbind-section" id="tb-bind-target-section" style="display:none">
+          <h4 class="tb-catbind-section-title" id="tb-bind-target-title">选择具体项目</h4>
+          <div class="tb-bind-target-list" id="tb-bind-target-list">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="tb-catbind-save" class="btn-primary">确认</button>
       </div>
     </div>
   </div>
