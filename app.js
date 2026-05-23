@@ -2316,6 +2316,7 @@
         <div class="habit-icon">${h.icon || '🔄'}</div>
         <div class="habit-info">
           <div class="habit-name">${esc(h.name)}</div>
+          <div class="habit-tags">${renderTagChips(h.tags || [])}</div>
           <div class="habit-stats">
             <span class="habit-stat">今日: <span class="habit-stat-val">${todayVal} ${unit}</span></span>
             <span class="habit-stat">累计: <span class="habit-stat-val">${totalVal} ${unit}</span></span>
@@ -2363,6 +2364,23 @@
     document.getElementById('habit-edit-type').value = habit ? habit.type : 'duration';
     document.getElementById('habit-edit-icon').value = habit ? habit.icon : '';
     document.getElementById('habit-edit-drops').value = habit ? habit.dropsPerUnit : 2;
+
+    // Render tag selector
+    const tagSelector = document.getElementById('habit-tag-selector');
+    if (tagSelector) {
+      const selectedTags = habit ? (habit.tags || []) : [];
+      tagSelector.innerHTML = '';
+      (state.tags || []).forEach(tag => {
+        const chip = document.createElement('span');
+        chip.className = 'tag-chip' + (selectedTags.includes(tag.id) ? ' selected' : '');
+        chip.style.cssText = `background:${tag.color}22;color:${tag.color}`;
+        chip.textContent = tag.name;
+        chip.dataset.tagId = tag.id;
+        chip.addEventListener('click', () => chip.classList.toggle('selected'));
+        tagSelector.appendChild(chip);
+      });
+    }
+
     habitModalOverlay.classList.remove('hidden');
   }
 
@@ -2389,11 +2407,14 @@
       }
     }
     const habits = getHabits();
+    // Collect selected tags
+    const selectedTagEls = document.querySelectorAll('#habit-tag-selector .tag-chip.selected');
+    const tags = Array.from(selectedTagEls).map(el => el.dataset.tagId);
     if (editingHabitId) {
       const h = habits.find(x => x.id === editingHabitId);
-      if (h) { h.name = name; h.type = type; h.icon = icon; h.dropsPerUnit = dropsPerUnit; }
+      if (h) { h.name = name; h.type = type; h.icon = icon; h.dropsPerUnit = dropsPerUnit; h.tags = tags; }
     } else {
-      habits.push({ id: 'habit-' + genId(), name, type, icon, dropsPerUnit, createdAt: new Date().toISOString() });
+      habits.push({ id: 'habit-' + genId(), name, type, icon, dropsPerUnit, tags, createdAt: new Date().toISOString() });
     }
     saveState();
     habitModalOverlay.classList.add('hidden');
@@ -2829,11 +2850,28 @@
 
       if (entry && entry.isStart) {
         const b = entry.block;
-        const cat = TB_CATEGORIES[b.category] || TB_CATEGORIES.other;
+        let blockColor = (TB_CATEGORIES[b.category] || TB_CATEGORIES.daily).color;
+        let tagLabel = '';
+        // If bound to a task with tags, use first tag color
+        if (b.bindType === 'task' && b.bindId) {
+          const t = state.tasks.find(x => x.id === b.bindId);
+          if (t && t.tags && t.tags.length > 0) {
+            const tag = getTag(t.tags[0]);
+            if (tag) { blockColor = tag.color; tagLabel = tag.name; }
+          }
+        }
+        // If bound to a habit with tags, use first tag color
+        if (b.bindType === 'habit' && b.bindId) {
+          const h = getHabits().find(x => x.id === b.bindId);
+          if (h && h.tags && h.tags.length > 0) {
+            const tag = getTag(h.tags[0]);
+            if (tag) { blockColor = tag.color; tagLabel = tag.name; }
+          }
+        }
         const displayName = b.taskId ? ((state.tasks.find(t => t.id === b.taskId) || {}).name || b.name) : b.name;
         const spanSlots = entry.span;
         const heightPx = spanSlots * 36 - 2; // 36px per slot minus gap
-        html += `<div class="tb-slot-block" style="background:${cat.color};height:${heightPx}px" data-block-id="${b.id}">`;
+        html += `<div class="tb-slot-block" style="background:${blockColor};height:${heightPx}px" data-block-id="${b.id}">`;
         html += `<span class="tb-slot-block-name">${esc(displayName)}</span>`;
         html += `<span class="tb-slot-block-time">${b.start} - ${b.end}</span>`;
         html += `</div>`;
@@ -2988,10 +3026,18 @@
       if (b.bindType && b.bindType !== 'none') {
         if (b.bindType === 'task' && b.bindId) {
           const t = state.tasks.find(x => x.id === b.bindId);
-          if (t) bindInfo.push({ name: t.name, icon: '\uD83D\uDCCB', color: '#6366f1', time: b.start + '-' + b.end });
+          if (t) {
+            let color = '#6366f1';
+            if (t.tags && t.tags.length > 0) { const tag = getTag(t.tags[0]); if (tag) color = tag.color; }
+            bindInfo.push({ name: t.name, icon: '\uD83D\uDCCB', color, time: b.start + '-' + b.end });
+          }
         } else if (b.bindType === 'habit' && b.bindId) {
           const h = getHabits().find(x => x.id === b.bindId);
-          if (h) bindInfo.push({ name: h.name, icon: h.icon || '\u2705', color: '#22c55e', time: b.start + '-' + b.end });
+          if (h) {
+            let color = '#22c55e';
+            if (h.tags && h.tags.length > 0) { const tag = getTag(h.tags[0]); if (tag) color = tag.color; }
+            bindInfo.push({ name: h.name, icon: h.icon || '\u2705', color, time: b.start + '-' + b.end });
+          }
         }
       }
     });
@@ -3025,23 +3071,9 @@
     const overlay = document.getElementById('tb-modal-overlay');
     const titleEl = document.getElementById('tb-modal-title');
     const nameInput = document.getElementById('tb-edit-name');
-    const taskSelect = document.getElementById('tb-edit-task');
     const startInput = document.getElementById('tb-edit-start');
     const endInput = document.getElementById('tb-edit-end');
     const deleteBtn = document.getElementById('tb-modal-delete');
-
-    // Populate task select
-    taskSelect.innerHTML = '<option value="">不关联</option>';
-    state.tasks.filter(t => !t.done).forEach(t => {
-      taskSelect.innerHTML += `<option value="${t.id}">${esc(t.name)}</option>`;
-    });
-
-    // Toggle name field visibility based on task selection
-    const nameRow = nameInput.closest('.form-row');
-    function updateNameVisibility() {
-      nameRow.style.display = taskSelect.value ? 'none' : '';
-    }
-    taskSelect.onchange = updateNameVisibility;
 
     if (blockId) {
       const block = getTimeBlocks().find(b => b.id === blockId);
@@ -3049,73 +3081,132 @@
       editingBlockId = blockId;
       titleEl.textContent = '编辑时间块';
       nameInput.value = block.name;
-      taskSelect.value = block.taskId || '';
       startInput.value = block.start;
       endInput.value = block.end;
       deleteBtn.style.display = '';
-
-      // Restore bind info
-      const bindType = block.bindType || 'none';
-      const bindId = block.bindId || null;
-      const category = block.category || 'daily';
-      updateCatBindDisplay(category, bindType, bindId);
+      tbCatBindState = {
+        category: block.category || 'daily',
+        bindType: block.bindType || 'none',
+        bindId: block.bindId || null
+      };
     } else {
       editingBlockId = null;
       titleEl.textContent = '添加时间块';
       nameInput.value = '';
-      taskSelect.value = '';
       startInput.value = presetStart || '09:00';
       endInput.value = presetEnd || '10:00';
       deleteBtn.style.display = 'none';
-
-      // Default: daily category, no binding
-      updateCatBindDisplay('daily', 'none', null);
+      tbCatBindState = { category: 'daily', bindType: 'none', bindId: null };
     }
-    updateNameVisibility();
+
+    renderTbCatChips();
+    renderTbBindChips();
+    renderTbBindTargets();
+    updateTbNameVisibility();
+
     overlay.classList.remove('hidden');
   }
 
-  // Update the category button and bind display in the time block form
-  function updateCatBindDisplay(category, bindType, bindId) {
-    const cat = TB_CATEGORIES[category] || TB_CATEGORIES.daily;
-    const catDot = document.getElementById('tb-cat-dot');
-    const catLabel = document.getElementById('tb-cat-label');
-    const bindDisplay = document.getElementById('tb-bind-display');
-    const bindTag = document.getElementById('tb-bind-tag');
+  function renderTbCatChips() {
+    const container = document.getElementById('tb-cat-chips');
+    if (!container) return;
+    container.innerHTML = '';
+    TB_PRIMARY_CATS.forEach(key => {
+      const cat = TB_CATEGORIES[key];
+      const chip = document.createElement('span');
+      chip.className = 'tb-chip' + (tbCatBindState.category === key ? ' selected' : '');
+      chip.innerHTML = `<span class="tb-chip-dot" style="background:${cat.color}"></span>${cat.label}`;
+      chip.addEventListener('click', () => {
+        tbCatBindState.category = key;
+        renderTbCatChips();
+      });
+      container.appendChild(chip);
+    });
+  }
 
-    if (catDot) catDot.style.background = cat.color;
-    if (catLabel) catLabel.textContent = cat.label;
+  function renderTbBindChips() {
+    const container = document.getElementById('tb-bind-chips');
+    if (!container) return;
+    container.innerHTML = '';
+    Object.entries(TB_BIND_TYPES).forEach(([key, bt]) => {
+      const chip = document.createElement('span');
+      chip.className = 'tb-chip' + (tbCatBindState.bindType === key ? ' selected' : '');
+      chip.textContent = bt.icon + ' ' + bt.label;
+      chip.addEventListener('click', () => {
+        tbCatBindState.bindType = key;
+        if (key === 'none') tbCatBindState.bindId = null;
+        renderTbBindChips();
+        renderTbBindTargets();
+        updateTbNameVisibility();
+      });
+      container.appendChild(chip);
+    });
+  }
 
-    if (bindType && bindType !== 'none') {
-      if (bindDisplay) {
-        bindDisplay.style.display = 'flex';
-        const bt = TB_BIND_TYPES[bindType];
-        let label = bt ? bt.icon + ' ' + bt.label : '';
-        if (bindType === 'task' && bindId) {
-          const t = state.tasks.find(x => x.id === bindId);
-          if (t) label = '\uD83D\uDCCB ' + esc(t.name);
-        } else if (bindType === 'habit' && bindId) {
-          const h = getHabits().find(x => x.id === bindId);
-          if (h) label = '\u2705 ' + esc(h.name);
-        }
-        if (bindTag) bindTag.textContent = label;
+  function renderTbBindTargets() {
+    const row = document.getElementById('tb-bind-target-row');
+    const list = document.getElementById('tb-bind-target-list');
+    const label = document.getElementById('tb-bind-target-label');
+    if (!row || !list) return;
+
+    if (tbCatBindState.bindType === 'none') {
+      row.style.display = 'none';
+      return;
+    }
+    row.style.display = '';
+
+    if (tbCatBindState.bindType === 'task') {
+      label.textContent = '选择任务';
+      const tasks = state.tasks.filter(t => !t.done);
+      list.innerHTML = '';
+      if (tasks.length === 0) {
+        list.innerHTML = '<div style="color:var(--text-muted);font-size:.82rem;padding:.5rem">暂无活跃任务</div>';
+        return;
       }
-    } else {
-      if (bindDisplay) bindDisplay.style.display = 'none';
+      tasks.forEach(t => {
+        const el = document.createElement('div');
+        el.className = 'tb-bind-target-item' + (tbCatBindState.bindId === t.id ? ' selected' : '');
+        const tagChips = renderTagChips(t.tags);
+        el.innerHTML = `<span class="tbti-icon">\uD83D\uDCCB</span><span class="tbti-name">${esc(t.name)}</span><span class="tbti-tags">${tagChips}</span>`;
+        el.addEventListener('click', () => {
+          tbCatBindState.bindId = t.id;
+          renderTbBindTargets();
+          updateTbNameVisibility();
+        });
+        list.appendChild(el);
+      });
+    } else if (tbCatBindState.bindType === 'habit') {
+      label.textContent = '选择打卡';
+      const habits = getHabits();
+      list.innerHTML = '';
+      if (habits.length === 0) {
+        list.innerHTML = '<div style="color:var(--text-muted);font-size:.82rem;padding:.5rem">暂无习惯</div>';
+        return;
+      }
+      habits.forEach(h => {
+        const el = document.createElement('div');
+        el.className = 'tb-bind-target-item' + (tbCatBindState.bindId === h.id ? ' selected' : '');
+        const tagChips = renderTagChips(h.tags || []);
+        el.innerHTML = `<span class="tbti-icon">${h.icon || '\uD83D\uDD04'}</span><span class="tbti-name">${esc(h.name)}</span><span class="tbti-tags">${tagChips}</span><span class="tbti-meta">${h.type === 'duration' ? '时长' : '次数'}</span>`;
+        el.addEventListener('click', () => {
+          tbCatBindState.bindId = h.id;
+          renderTbBindTargets();
+          updateTbNameVisibility();
+        });
+        list.appendChild(el);
+      });
     }
   }
 
-  // Category bind button -> open selection modal
-  document.getElementById('tb-cat-btn').addEventListener('click', () => {
-    openCatBindModal();
-  });
-
-  // Bind clear button
-  document.getElementById('tb-bind-clear').addEventListener('click', () => {
-    tbCatBindState.bindType = 'none';
-    tbCatBindState.bindId = null;
-    updateCatBindDisplay(tbCatBindState.category || 'daily', 'none', null);
-  });
+  function updateTbNameVisibility() {
+    const nameInput = document.getElementById('tb-edit-name');
+    const nameRow = nameInput.closest('.form-row');
+    if (tbCatBindState.bindType !== 'none' && tbCatBindState.bindId) {
+      nameRow.style.display = 'none';
+    } else {
+      nameRow.style.display = '';
+    }
+  }
 
   // Time block modal events
   const tbModalOverlay = document.getElementById('tb-modal-overlay');
@@ -3123,39 +3214,39 @@
 
   document.getElementById('tb-modal-save').addEventListener('click', () => {
     let name = document.getElementById('tb-edit-name').value.trim();
-    const taskId = document.getElementById('tb-edit-task').value || null;
     const start = document.getElementById('tb-edit-start').value;
     const end = document.getElementById('tb-edit-end').value;
-    // If linked to a task, use task name automatically
-    if (taskId) {
-      const linkedTask = state.tasks.find(t => t.id === taskId);
-      name = linkedTask ? linkedTask.name : name;
-    }
-    if (!name && !taskId) {
-      alert('请输入活动名称或关联任务');
-      return;
-    }
-    if (!start || !end) {
-      alert('请填写开始和结束时间');
-      return;
-    }
-    if (timeToMinutes(end) <= timeToMinutes(start)) {
-      alert('结束时间必须晚于开始时间');
-      return;
-    }
 
     const category = tbCatBindState.category || 'daily';
     const bindType = tbCatBindState.bindType || 'none';
     const bindId = tbCatBindState.bindId || null;
 
+    // Auto-derive name from bound target
+    let taskId = null;
+    if (bindType === 'task' && bindId) {
+      const t = state.tasks.find(x => x.id === bindId);
+      if (t) { name = t.name; taskId = bindId; }
+    } else if (bindType === 'habit' && bindId) {
+      const h = getHabits().find(x => x.id === bindId);
+      if (h) name = h.name;
+    }
+
+    if (!name) { alert('请输入活动名称或关联任务/打卡'); return; }
+    if (!start || !end) { alert('请填写开始和结束时间'); return; }
+    if (timeToMinutes(end) <= timeToMinutes(start)) { alert('结束时间必须晚于开始时间'); return; }
+
+    // Reset bindType if no target selected
+    const finalBindType = (bindType !== 'none' && !bindId) ? 'none' : bindType;
+    const finalBindId = finalBindType === 'none' ? null : bindId;
+
     if (editingBlockId) {
       const block = getTimeBlocks().find(b => b.id === editingBlockId);
       if (block) {
-        block.name = name || '-';
+        block.name = name;
         block.taskId = taskId;
         block.category = category;
-        block.bindType = bindType;
-        block.bindId = bindId;
+        block.bindType = finalBindType;
+        block.bindId = finalBindId;
         block.start = start;
         block.end = end;
       }
@@ -3164,7 +3255,7 @@
       state.timeBlocks.push({
         id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
         date: tbViewDate,
-        name: name || '-', taskId, category, bindType, bindId, start, end,
+        name, taskId, category, bindType: finalBindType, bindId: finalBindId, start, end,
       });
     }
     saveState();
@@ -3215,139 +3306,6 @@
     ws.sleep = this.value;
     setWakeSleep(tbViewDate, ws.wake, ws.sleep);
     renderWakeSleepUI();
-  });
-
-  // ===== CATEGORY & BINDING SELECTION MODAL =====
-  const catBindOverlay = document.getElementById('tb-catbind-overlay');
-  setupModalClose(catBindOverlay, document.getElementById('tb-catbind-close'));
-
-  function openCatBindModal() {
-    // Initialize from current time block state
-    const existingCat = tbCatBindState.category || 'daily';
-    const existingBindType = tbCatBindState.bindType || 'none';
-    const existingBindId = tbCatBindState.bindId || null;
-
-    tbCatBindState = { category: existingCat, bindType: existingBindType, bindId: existingBindId };
-
-    renderCatGrid();
-    renderBindTypeList();
-    renderBindTargetList();
-
-    catBindOverlay.classList.remove('hidden');
-  }
-
-  function renderCatGrid() {
-    const grid = document.getElementById('tb-cat-grid');
-    if (!grid) return;
-    grid.innerHTML = '';
-    TB_PRIMARY_CATS.forEach(catKey => {
-      const cat = TB_CATEGORIES[catKey];
-      const el = document.createElement('div');
-      el.className = 'tb-cat-item' + (tbCatBindState.category === catKey ? ' selected' : '');
-      el.style.color = cat.color;
-      el.dataset.cat = catKey;
-      el.innerHTML = `<span class="tb-cat-item-dot" style="background:${cat.color}"></span><span class="tb-cat-item-label">${cat.label}</span>`;
-      el.addEventListener('click', () => {
-        tbCatBindState.category = catKey;
-        renderCatGrid();
-      });
-      grid.appendChild(el);
-    });
-  }
-
-  function renderBindTypeList() {
-    const list = document.getElementById('tb-bind-type-list');
-    if (!list) return;
-    list.querySelectorAll('.tb-bind-type-item').forEach(el => {
-      const bt = el.dataset.bind;
-      el.classList.toggle('selected', tbCatBindState.bindType === bt);
-    });
-    // Show/hide target section based on bind type
-    const targetSection = document.getElementById('tb-bind-target-section');
-    if (targetSection) {
-      targetSection.style.display = (tbCatBindState.bindType === 'none') ? 'none' : '';
-    }
-  }
-
-  function renderBindTargetList() {
-    const list = document.getElementById('tb-bind-target-list');
-    const title = document.getElementById('tb-bind-target-title');
-    if (!list) return;
-
-    if (tbCatBindState.bindType === 'task') {
-      if (title) title.textContent = '选择任务';
-      const activeTasks = state.tasks.filter(t => !t.done);
-      list.innerHTML = '';
-      if (activeTasks.length === 0) {
-        list.innerHTML = '<div style="color:var(--text-muted);font-size:.82rem;padding:.5rem">暂无活跃任务</div>';
-        return;
-      }
-      activeTasks.forEach(t => {
-        const el = document.createElement('div');
-        el.className = 'tb-bind-target-item' + (tbCatBindState.bindId === t.id ? ' selected' : '');
-        el.dataset.id = t.id;
-        el.innerHTML = `<span class="tbti-icon">\uD83D\uDCCB</span><span class="tbti-name">${esc(t.name)}</span><span class="tbti-meta">${PRIORITY_LABELS[t.quadrant] || ''}</span>`;
-        el.addEventListener('click', () => {
-          tbCatBindState.bindId = t.id;
-          renderBindTargetList();
-        });
-        list.appendChild(el);
-      });
-    } else if (tbCatBindState.bindType === 'habit') {
-      if (title) title.textContent = '选择习惯';
-      const habits = getHabits();
-      list.innerHTML = '';
-      if (habits.length === 0) {
-        list.innerHTML = '<div style="color:var(--text-muted);font-size:.82rem;padding:.5rem">暂无习惯，请先在「长期习惯」中添加</div>';
-        return;
-      }
-      habits.forEach(h => {
-        const el = document.createElement('div');
-        el.className = 'tb-bind-target-item' + (tbCatBindState.bindId === h.id ? ' selected' : '');
-        el.dataset.id = h.id;
-        el.innerHTML = `<span class="tbti-icon">${h.icon || '\uD83D\uDD04'}</span><span class="tbti-name">${esc(h.name)}</span><span class="tbti-meta">${h.type === 'duration' ? '时长' : '次数'}</span>`;
-        el.addEventListener('click', () => {
-          tbCatBindState.bindId = h.id;
-          renderBindTargetList();
-        });
-        list.appendChild(el);
-      });
-    } else {
-      list.innerHTML = '';
-    }
-  }
-
-  // Bind type item clicks
-  document.getElementById('tb-bind-type-list').addEventListener('click', (e) => {
-    const item = e.target.closest('.tb-bind-type-item');
-    if (!item) return;
-    const bt = item.dataset.bind;
-    tbCatBindState.bindType = bt;
-    // Reset bindId when switching type
-    if (bt === 'none') tbCatBindState.bindId = null;
-    renderBindTypeList();
-    renderBindTargetList();
-  });
-
-  // Save from catbind modal
-  document.getElementById('tb-catbind-save').addEventListener('click', () => {
-    if (!tbCatBindState.category) {
-      alert('请选择一个类别');
-      return;
-    }
-    // Auto-set bindId to taskId if bindType is task and bindId not set
-    if (tbCatBindState.bindType === 'task' && !tbCatBindState.bindId) {
-      // No specific task selected, set bindType to none
-      tbCatBindState.bindType = 'none';
-    }
-    if (tbCatBindState.bindType === 'habit' && !tbCatBindState.bindId) {
-      tbCatBindState.bindType = 'none';
-    }
-
-    // Update the form display
-    updateCatBindDisplay(tbCatBindState.category, tbCatBindState.bindType, tbCatBindState.bindId);
-
-    catBindOverlay.classList.add('hidden');
   });
 
   // ===== DEMO DATA SEEDING =====
