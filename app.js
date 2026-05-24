@@ -2717,12 +2717,13 @@
   });
 
   // ===== TIME BLOCK VIEW =====
-  // Base categories: 日常、娱乐、未记录 (user-configurable preset)
+  // Base categories: 日常、娱乐 (不关联时手动选择)
+  // 关联任务/打卡时直接使用目标自带的标签
   // Legacy categories kept for backward compatibility with existing data
   const TB_CATEGORIES = {
     daily:    { label: '日常', color: '#7c9a6e' },
     fun:      { label: '娱乐', color: '#e07a5f' },
-    untracked:{ label: '未记录', color: '#8899a6' },
+    untracked:{ label: '未记录', color: '#8899a6' }, // legacy
     // Legacy (for existing data compatibility)
     work:     { label: '工作', color: '#6366f1' },
     study:    { label: '学习', color: '#06b6d4' },
@@ -2732,8 +2733,8 @@
     commute:  { label: '通勤', color: '#8b5cf6' },
     other:    { label: '其他', color: '#64748b' },
   };
-  // Primary categories shown in the selection modal
-  const TB_PRIMARY_CATS = ['daily', 'fun', 'untracked'];
+  // Primary categories: only shown when bindType === 'none'
+  const TB_PRIMARY_CATS = ['daily', 'fun'];
   // Bind types
   const TB_BIND_TYPES = {
     none:  { label: '不关联', icon: '⊘' },
@@ -3018,38 +3019,48 @@
       summary.innerHTML = '<h3>今日统计</h3><p style="color:var(--text-muted);font-size:.85rem">暂无数据</p>';
       return;
     }
-    const catTotals = {};
+    // Aggregate by display label (category name or tag name)
+    const labelTotals = {}; // { label: { mins, color } }
     const bindInfo = [];
     blocks.forEach(b => {
       const dur = timeToMinutes(b.end) - timeToMinutes(b.start);
-      if (dur > 0) catTotals[b.category] = (catTotals[b.category] || 0) + dur;
-      if (b.bindType && b.bindType !== 'none') {
-        if (b.bindType === 'task' && b.bindId) {
-          const t = state.tasks.find(x => x.id === b.bindId);
-          if (t) {
-            let color = '#6366f1';
-            if (t.tags && t.tags.length > 0) { const tag = getTag(t.tags[0]); if (tag) color = tag.color; }
-            bindInfo.push({ name: t.name, icon: '\uD83D\uDCCB', color, time: b.start + '-' + b.end });
-          }
-        } else if (b.bindType === 'habit' && b.bindId) {
-          const h = getHabits().find(x => x.id === b.bindId);
-          if (h) {
-            let color = '#22c55e';
-            if (h.tags && h.tags.length > 0) { const tag = getTag(h.tags[0]); if (tag) color = tag.color; }
-            bindInfo.push({ name: h.name, icon: h.icon || '\u2705', color, time: b.start + '-' + b.end });
-          }
+      if (dur <= 0) return;
+
+      let labelKey, labelColor;
+      // Determine display label: if bound with tags, use tag; otherwise use category
+      if (b.bindType === 'task' && b.bindId) {
+        const t = state.tasks.find(x => x.id === b.bindId);
+        if (t && t.tags && t.tags.length > 0) {
+          const tag = getTag(t.tags[0]);
+          if (tag) { labelKey = tag.name; labelColor = tag.color; }
         }
+        if (t) bindInfo.push({ name: t.name, icon: '\uD83D\uDCCB', color: labelColor || '#6366f1', time: b.start + '-' + b.end });
+      } else if (b.bindType === 'habit' && b.bindId) {
+        const h = getHabits().find(x => x.id === b.bindId);
+        if (h && h.tags && h.tags.length > 0) {
+          const tag = getTag(h.tags[0]);
+          if (tag) { labelKey = tag.name; labelColor = tag.color; }
+        }
+        if (h) bindInfo.push({ name: h.name, icon: h.icon || '\u2705', color: labelColor || '#22c55e', time: b.start + '-' + b.end });
       }
+      // Fallback to category
+      if (!labelKey) {
+        const cat = TB_CATEGORIES[b.category] || TB_CATEGORIES.daily;
+        labelKey = cat.label;
+        labelColor = cat.color;
+      }
+      if (!labelTotals[labelKey]) labelTotals[labelKey] = { mins: 0, color: labelColor };
+      labelTotals[labelKey].mins += dur;
     });
+
     let html = '<h3>今日统计</h3><div class="tb-summary-grid">';
-    for (const [cat, mins] of Object.entries(catTotals).sort((a,b) => b[1] - a[1])) {
-      const info = TB_CATEGORIES[cat] || TB_CATEGORIES.daily;
-      const hrs = Math.floor(mins / 60);
-      const m = mins % 60;
+    for (const [label, info] of Object.entries(labelTotals).sort((a,b) => b[1].mins - a[1].mins)) {
+      const hrs = Math.floor(info.mins / 60);
+      const m = info.mins % 60;
       const timeStr = hrs > 0 ? `${hrs}h${m > 0 ? m + 'm' : ''}` : `${m}m`;
-      html += `<div class="tb-summary-item"><span class="tb-summary-dot" style="background:${info.color}"></span><span class="tb-summary-label">${info.label}</span><span class="tb-summary-val">${timeStr}</span></div>`;
+      html += `<div class="tb-summary-item"><span class="tb-summary-dot" style="background:${info.color}"></span><span class="tb-summary-label">${esc(label)}</span><span class="tb-summary-val">${timeStr}</span></div>`;
     }
-    const totalMin = Object.values(catTotals).reduce((s,v) => s+v, 0);
+    const totalMin = Object.values(labelTotals).reduce((s,v) => s + v.mins, 0);
     const totalH = Math.floor(totalMin / 60);
     const totalM = totalMin % 60;
     html += `<div class="tb-summary-item" style="border-color:var(--accent)"><span class="tb-summary-dot" style="background:var(--accent)"></span><span class="tb-summary-label">合计</span><span class="tb-summary-val">${totalH}h${totalM > 0 ? totalM + 'm' : ''}</span></div>`;
@@ -3057,7 +3068,7 @@
 
     // Binding info section
     if (bindInfo.length > 0) {
-      html += '<h3 style="margin-top:.8rem">绑定记录</h3><div class="tb-summary-grid">';
+      html += '<h3 style="margin-top:.8rem">关联记录</h3><div class="tb-summary-grid">';
       bindInfo.forEach(bi => {
         html += `<div class="tb-summary-item"><span class="tb-summary-dot" style="background:${bi.color}"></span><span class="tb-summary-label">${bi.icon} ${esc(bi.name)}</span><span class="tb-summary-val">${bi.time}</span></div>`;
       });
@@ -3099,14 +3110,15 @@
       tbCatBindState = { category: 'daily', bindType: 'none', bindId: null };
     }
 
-    renderTbCatChips();
     renderTbBindChips();
     renderTbBindTargets();
-    updateTbNameVisibility();
+    renderTbCatChips();
+    updateTbFormVisibility();
 
     overlay.classList.remove('hidden');
   }
 
+  // Render category chips (日常/娱乐) — only visible when bindType === 'none'
   function renderTbCatChips() {
     const container = document.getElementById('tb-cat-chips');
     if (!container) return;
@@ -3134,10 +3146,17 @@
       chip.textContent = bt.icon + ' ' + bt.label;
       chip.addEventListener('click', () => {
         tbCatBindState.bindType = key;
-        if (key === 'none') tbCatBindState.bindId = null;
+        if (key === 'none') {
+          tbCatBindState.bindId = null;
+          // Default to 'daily' when switching to no-bind
+          if (!tbCatBindState.category || tbCatBindState.category === 'untracked') {
+            tbCatBindState.category = 'daily';
+          }
+        }
         renderTbBindChips();
         renderTbBindTargets();
-        updateTbNameVisibility();
+        renderTbCatChips();
+        updateTbFormVisibility();
       });
       container.appendChild(chip);
     });
@@ -3171,7 +3190,7 @@
         el.addEventListener('click', () => {
           tbCatBindState.bindId = t.id;
           renderTbBindTargets();
-          updateTbNameVisibility();
+          updateTbFormVisibility();
         });
         list.appendChild(el);
       });
@@ -3191,21 +3210,22 @@
         el.addEventListener('click', () => {
           tbCatBindState.bindId = h.id;
           renderTbBindTargets();
-          updateTbNameVisibility();
+          updateTbFormVisibility();
         });
         list.appendChild(el);
       });
     }
   }
 
-  function updateTbNameVisibility() {
-    const nameInput = document.getElementById('tb-edit-name');
-    const nameRow = nameInput.closest('.form-row');
-    if (tbCatBindState.bindType !== 'none' && tbCatBindState.bindId) {
-      nameRow.style.display = 'none';
-    } else {
-      nameRow.style.display = '';
-    }
+  // Controls visibility of category row and name row based on bind state
+  // 关联任务/打卡 → 不显示分类选择，不显示名称输入
+  // 不关联 → 显示分类选择，显示名称输入
+  function updateTbFormVisibility() {
+    const catRow = document.getElementById('tb-cat-row');
+    const nameRow = document.getElementById('tb-name-row');
+    const isBound = tbCatBindState.bindType !== 'none';
+    if (catRow) catRow.style.display = isBound ? 'none' : '';
+    if (nameRow) nameRow.style.display = isBound ? 'none' : '';
   }
 
   // Time block modal events
@@ -3308,94 +3328,10 @@
     renderWakeSleepUI();
   });
 
-  // ===== DEMO DATA SEEDING =====
-  function seedDemoData() {
-    if (state.tasks.length > 0) return; // Already has data
-    const today = todayKey();
-    const dm1 = new Date(); dm1.setDate(dm1.getDate() - 1);
-    const dm2 = new Date(); dm2.setDate(dm2.getDate() - 2);
-    const d1 = new Date(); d1.setDate(d1.getDate() + 1);
-    const d2 = new Date(); d2.setDate(d2.getDate() + 2);
-    const d3 = new Date(); d3.setDate(d3.getDate() + 3);
-    const d4 = new Date(); d4.setDate(d4.getDate() + 4);
-    const d5 = new Date(); d5.setDate(d5.getDate() + 5);
-    const d6 = new Date(); d6.setDate(d6.getDate() + 6);
-    const yesterday = localDateKey(dm1), dayBefore = localDateKey(dm2);
-    const day1 = localDateKey(d1), day2 = localDateKey(d2), day3 = localDateKey(d3);
-    const day4 = localDateKey(d4), day5 = localDateKey(d5), day6 = localDateKey(d6);
-
-    // Seed tags
-    state.tags = [
-      { id: 'tag-work', name: '工作', color: '#6366f1' },
-      { id: 'tag-study', name: '学习', color: '#06b6d4' },
-      { id: 'tag-life', name: '生活', color: '#22c55e' },
-      { id: 'tag-health', name: '健康', color: '#f97316' },
-    ];
-
-    state.tasks = [
-      // 前天 (已完成)
-      { id: 'demo-p1', name: '整理项目文档', quadrant: 'important', date: dayBefore, duration: 60, done: true, tags: ['tag-work'], sortOrder: 0 },
-      { id: 'demo-p2', name: '看完 React 教程第5章', quadrant: 'important', date: dayBefore, duration: 50, done: true, tags: ['tag-study'], sortOrder: 1 },
-      // 昨天 (部分完成)
-      { id: 'demo-y1', name: '修复登录页 Bug', quadrant: 'urgent-important', date: yesterday, duration: 45, done: true, tags: ['tag-work'], sortOrder: 2 },
-      { id: 'demo-y2', name: '跑步3公里', quadrant: 'important', date: yesterday, duration: 30, done: true, tags: ['tag-health'], sortOrder: 3 },
-      { id: 'demo-y3', name: '回复合作方邮件', quadrant: 'urgent', date: yesterday, duration: 20, done: false, tags: ['tag-work'], sortOrder: 4 },
-      // 今天
-      { id: 'demo1', name: '完成周报', quadrant: 'urgent-important', date: today, duration: 60, done: false, tags: ['tag-work'], sortOrder: 5 },
-      { id: 'demo2', name: '回复客户邮件', quadrant: 'urgent', date: today, duration: 30, done: false, tags: ['tag-work'], sortOrder: 6 },
-      { id: 'demo3', name: '阅读《原则》第三章', quadrant: 'important', date: today, duration: 45, done: false, tags: ['tag-study'], sortOrder: 7 },
-      { id: 'demo4', name: '去超市买菜', quadrant: 'neither', date: today, duration: 40, done: false, tags: ['tag-life'], sortOrder: 8 },
-      // 明天
-      { id: 'demo5', name: '准备项目方案PPT', quadrant: 'urgent-important', date: day1, duration: 120, done: false, tags: ['tag-work'], sortOrder: 9 },
-      { id: 'demo6', name: '团队周会', quadrant: 'urgent', date: day1, duration: 60, done: false, tags: ['tag-work'], sortOrder: 10 },
-      { id: 'demo7', name: '游泳1小时', quadrant: 'important', date: day1, duration: 60, done: false, tags: ['tag-health'], sortOrder: 11 },
-      // 后天
-      { id: 'demo8', name: '学习 TypeScript 基础', quadrant: 'important', date: day2, duration: 90, done: false, tags: ['tag-study'], sortOrder: 12 },
-      { id: 'demo9', name: '整理书桌', quadrant: 'neither', date: day2, duration: 30, done: false, tags: ['tag-life'], sortOrder: 13 },
-      // +3
-      { id: 'demo10', name: '约牙医检查', quadrant: 'neither', date: day3, duration: 60, done: false, tags: ['tag-health'], sortOrder: 14 },
-      { id: 'demo11', name: '跑步5公里', quadrant: 'important', date: day3, duration: 40, done: false, tags: ['tag-health'], sortOrder: 15 },
-      // +4
-      { id: 'demo12', name: '提交代码审查', quadrant: 'urgent-important', date: day4, duration: 45, done: false, tags: ['tag-work'], sortOrder: 16 },
-      { id: 'demo13', name: '看纪录片', quadrant: 'neither', date: day4, duration: 90, done: false, tags: ['tag-life'], sortOrder: 17 },
-      // +5 ~ +6
-      { id: 'demo14', name: '写技术博客', quadrant: 'important', date: day5, duration: 90, done: false, tags: ['tag-study'], sortOrder: 18 },
-      { id: 'demo15', name: '采购日用品', quadrant: 'neither', date: day6, duration: 30, done: false, tags: ['tag-life'], sortOrder: 19 },
-    ];
-
-    // Seed time blocks — today full day, yesterday partial
-    state.timeBlocks = [
-      // 昨天
-      { id: 'tb-y1', date: yesterday, name: '修复Bug', taskId: 'demo-y1', category: 'daily', bindType: 'task', bindId: 'demo-y1', start: '09:00', end: '10:30' },
-      { id: 'tb-y2', date: yesterday, name: '跑步', taskId: 'demo-y2', category: 'fun', bindType: 'task', bindId: 'demo-y2', start: '17:00', end: '17:30' },
-      { id: 'tb-y3', date: yesterday, name: '看视频教程', taskId: null, category: 'fun', bindType: 'none', bindId: null, start: '20:00', end: '21:30' },
-      // 今天 — 丰富的一天
-      { id: 'tb1', date: today, name: '晨间阅读', taskId: 'demo3', category: 'daily', bindType: 'task', bindId: 'demo3', start: '07:30', end: '08:00' },
-      { id: 'tb2', date: today, name: '通勤', taskId: null, category: 'daily', bindType: 'none', bindId: null, start: '08:00', end: '08:30' },
-      { id: 'tb3', date: today, name: '处理邮件', taskId: 'demo2', category: 'daily', bindType: 'task', bindId: 'demo2', start: '09:00', end: '09:30' },
-      { id: 'tb4', date: today, name: '写周报', taskId: 'demo1', category: 'daily', bindType: 'task', bindId: 'demo1', start: '09:30', end: '11:00' },
-      { id: 'tb5', date: today, name: '午休', taskId: null, category: 'fun', bindType: 'none', bindId: null, start: '12:00', end: '13:00' },
-      { id: 'tb6', date: today, name: '项目开发', taskId: null, category: 'daily', bindType: 'none', bindId: null, start: '13:30', end: '15:30' },
-      { id: 'tb7', date: today, name: '买菜', taskId: 'demo4', category: 'daily', bindType: 'task', bindId: 'demo4', start: '17:00', end: '18:00' },
-      { id: 'tb8', date: today, name: '读书', taskId: null, category: 'fun', bindType: 'none', bindId: null, start: '20:00', end: '21:00' },
-    ];
-
-    // Seed wake/sleep data
-    state.wakeSleep = {
-      [yesterday]: { wake: '07:30', sleep: '23:00' },
-      [today]:     { wake: '07:00', sleep: '' },
-    };
-
-    saveState();
-  }
-
   // ===== INIT =====
   // Global touch event listeners for mobile drag
   document.addEventListener('touchmove', handleTouchMove, { passive: false });
   document.addEventListener('touchend', handleTouchEnd);
-
-  // Seed demo data if empty
-  seedDemoData();
 
   // 先用本地数据渲染（避免白屏），然后异步加载服务端数据覆盖
   loadSettingsUI();
