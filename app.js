@@ -49,6 +49,13 @@
     if (!Array.isArray(merged.shopItems)) merged.shopItems = null; // will be initialized with defaults on first access
     if (!Array.isArray(merged.shopHistory)) merged.shopHistory = [];
     if (!Array.isArray(merged.timeBlocks)) merged.timeBlocks = [];
+    // Migrate legacy taskId → bindType/bindId
+    merged.timeBlocks.forEach(b => {
+      if (b.taskId && !b.bindType) {
+        b.bindType = 'task';
+        b.bindId = b.taskId;
+      }
+    });
     if (!merged.wakeSleep) merged.wakeSleep = {};
     // Migrate tasks: category -> tags
     migrateTasks(merged);
@@ -2717,14 +2724,20 @@
   });
 
   // ===== TIME BLOCK VIEW =====
-  // Base categories: 日常、娱乐 (不关联时手动选择)
-  // 关联任务/打卡时直接使用目标自带的标签
-  // Legacy categories kept for backward compatibility with existing data
+  // ---- Constants ----
+  const TB_SLOT_HEIGHT_PX = 36;
+  const TB_SLOT_MINUTES   = 30;
+  const TB_DAY_START_MIN  = 7 * 60;           // 07:00
+  const TB_SLOT_COUNT     = 34;                // 7:00–24:00 = 17h = 34 half-hour slots
+  const TB_LONG_PRESS_MS  = 350;
+  const TB_SCROLL_THRESH  = 10;                // px — vertical movement to count as scroll
+  const TB_MOVE_CANCEL    = 5;                 // px — any movement to cancel long-press timer
+
   const TB_CATEGORIES = {
     daily:    { label: '日常', color: '#7c9a6e' },
     fun:      { label: '娱乐', color: '#e07a5f' },
-    untracked:{ label: '未记录', color: '#8899a6' }, // legacy
-    // Legacy (for existing data compatibility)
+    untracked:{ label: '未记录', color: '#8899a6' },
+    // Legacy (kept for existing data)
     work:     { label: '工作', color: '#6366f1' },
     study:    { label: '学习', color: '#06b6d4' },
     exercise: { label: '运动', color: '#22c55e' },
@@ -2733,51 +2746,139 @@
     commute:  { label: '通勤', color: '#8b5cf6' },
     other:    { label: '其他', color: '#64748b' },
   };
-  // Primary categories: only shown when bindType === 'none'
   const TB_PRIMARY_CATS = ['daily', 'fun'];
-  // Bind types
+
   const TB_BIND_TYPES = {
     none:  { label: '不关联', icon: '⊘' },
     task:  { label: '任务',   icon: '\uD83D\uDCCB' },
     habit: { label: '打卡',   icon: '\u2705' },
   };
-  let tbViewDate = todayKey();
-  let editingBlockId = null;
 
-  // Temp state for the category/binding selection modal
-  let tbCatBindState = { category: null, bindType: null, bindId: null };
+  // ---- Consolidated state ----
+  const tbState = {
+    viewDate:     todayKey(),
+    editingId:    null,                                  // block ID being edited (null = adding)
+    formBind:     { category: 'daily', bindType: 'none', bindId: null }, // modal form state
+    slotMap:      new Array(TB_SLOT_COUNT).fill(null),    // rebuilt per render, read by event handlers
+    drag: {
+      startSlot: null, endSlot: null, active: false,
+      timer: null,
+    },
+    touch: {
+      startX: 0, startY: 0,
+      locked: false,   // confirmed as intentional drag
+      scrolling: false, // confirmed as scroll
+    },
+  };
 
-  function getTimeBlocks() { return state.timeBlocks || []; }
+  // ---- Pure helpers ----
+  function timeToMinutes(t) {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + (m || 0);
+  }
 
-  // Wake/Sleep time: stored in state as { wakeSleep: { 'YYYY-MM-DD': { wake: 'HH:MM', sleep: 'HH:MM' } } }
+  function slotToTime(slot) {
+    const total = TB_DAY_START_MIN + slot * TB_SLOT_MINUTES;
+    return String(Math.floor(total / 60)).padStart(2, '0') + ':' +
+           String(total % 60).padStart(2, '0');
+  }
+
+  function blockToSlotRange(block) {
+    const sMin = timeToMinutes(block.start);
+    const eMin = timeToMinutes(block.end);
+    return {
+      start: Math.max(0, Math.floor((sMin - TB_DAY_START_MIN) / TB_SLOT_MINUTES)),
+      end:   Math.min(TB_SLOT_COUNT - 1, Math.ceil((eMin - TB_DAY_START_MIN) / TB_SLOT_MINUTES) - 1),
+    };
+  }
+
+  function getBlocksForDate(date) {
+    return (state.timeBlocks || [])
+      .filter(b => b.date === date)
+      .sort((a, b) => a.start.localeCompare(b.start));
+  }
+
+  function buildSlotMap(blocks) {
+    const map = new Array(TB_SLOT_COUNT).fill(null);
+    blocks.forEach(b => {
+      const r = blockToSlotRange(b);
+      for (let s = r.start; s <= r.end; s++) {
+        map[s] = { block: b, isStart: s === r.start, span: r.end - r.start + 1 };
+      }
+    });
+    return map;
+  }
+
+  /** Resolve display color & tag label for a time block */
+  function resolveBlockStyle(block) {
+    const bound = [
+      { type: 'task',  list: () => state.tasks },
+      { type: 'habit', list: () => getHabits() },
+    ];
+    for (const { type, list } of bound) {
+      if (block.bindType === type && block.bindId) {
+        const target = list().find(x => x.id === block.bindId);
+        if (target && target.tags && target.tags.length > 0) {
+          const tag = getTag(target.tags[0]);
+          if (tag) return { color: tag.color, tagLabel: tag.name };
+        }
+      }
+    }
+    const cat = TB_CATEGORIES[block.category] || TB_CATEGORIES.daily;
+    return { color: cat.color, tagLabel: cat.label };
+  }
+
+  /** Resolve the name to display on a time block */
+  function resolveBlockName(block) {
+    if (block.bindType === 'task' && block.bindId) {
+      const t = state.tasks.find(x => x.id === block.bindId);
+      if (t) return t.name;
+    }
+    if (block.bindType === 'habit' && block.bindId) {
+      const h = getHabits().find(x => x.id === block.bindId);
+      if (h) return h.name;
+    }
+    // Legacy fallback: taskId without bindType
+    if (block.taskId) {
+      const t = state.tasks.find(x => x.id === block.taskId);
+      if (t) return t.name;
+    }
+    return block.name;
+  }
+
+  function formatDuration(mins) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return (h > 0 ? h + 'h' : '') + (m > 0 ? m + 'm' : '') || '0m';
+  }
+
+  // ---- Wake/Sleep ----
   function getWakeSleep(date) {
     if (!state.wakeSleep) state.wakeSleep = {};
     return state.wakeSleep[date] || { wake: '', sleep: '' };
   }
+
   function setWakeSleep(date, wake, sleep) {
     if (!state.wakeSleep) state.wakeSleep = {};
     state.wakeSleep[date] = { wake, sleep };
     saveState();
   }
+
   function renderWakeSleepUI() {
-    const ws = getWakeSleep(tbViewDate);
-    const wakeInput = document.getElementById('tb-wake-time');
+    const ws = getWakeSleep(tbState.viewDate);
+    const wakeInput  = document.getElementById('tb-wake-time');
     const sleepInput = document.getElementById('tb-sleep-time');
-    const summary = document.getElementById('tb-sleep-summary');
-    if (wakeInput) wakeInput.value = ws.wake;
+    const summary    = document.getElementById('tb-sleep-summary');
+    if (wakeInput)  wakeInput.value  = ws.wake;
     if (sleepInput) sleepInput.value = ws.sleep;
-    // Show sleep duration summary
     if (summary) {
       if (ws.wake && ws.sleep) {
         let sleepMin = timeToMinutes(ws.sleep);
-        let wakeMin = timeToMinutes(ws.wake);
-        // Handle crossing midnight
+        const wakeMin = timeToMinutes(ws.wake);
         if (sleepMin > wakeMin) sleepMin -= 24 * 60;
-        let duration = wakeMin - sleepMin;
-        if (duration < 0) duration += 24 * 60;
-        const h = Math.floor(duration / 60);
-        const m = duration % 60;
-        summary.textContent = '睡眠 ' + (h > 0 ? h + 'h' : '') + (m > 0 ? m + 'm' : '');
+        let dur = wakeMin - sleepMin;
+        if (dur < 0) dur += 24 * 60;
+        summary.textContent = '睡眠 ' + formatDuration(dur);
       } else if (ws.wake) {
         summary.textContent = '起床 ' + ws.wake;
       } else if (ws.sleep) {
@@ -2788,112 +2889,70 @@
     }
   }
 
-  // Convert "HH:MM" to minutes from midnight
-  function timeToMinutes(t) {
-    const [h, m] = t.split(':').map(Number);
-    return h * 60 + (m || 0);
+  // ---- Drag state helpers ----
+  function resetDragState() {
+    clearTimeout(tbState.drag.timer);
+    tbState.drag.startSlot = null;
+    tbState.drag.endSlot   = null;
+    tbState.drag.active     = false;
+    tbState.touch.locked    = false;
+    tbState.touch.scrolling = false;
   }
-  // Convert slot index to "HH:MM"
-  function slotToTime(slot) {
-    const totalMin = 7 * 60 + slot * 30;
-    return String(Math.floor(totalMin / 60)).padStart(2,'0') + ':' + String(totalMin % 60).padStart(2,'0');
+
+  // ---- Rendering ----
+  function renderTbDateLabel() {
+    const el = document.getElementById('tb-current-date');
+    if (!el) return;
+    const d = new Date(tbState.viewDate + 'T00:00:00');
+    const weekNames = ['日','一','二','三','四','五','六'];
+    const isToday = tbState.viewDate === todayKey();
+    el.textContent = `${d.getMonth()+1}月${d.getDate()}日 周${weekNames[d.getDay()]}${isToday ? '（今天）' : ''}`;
   }
-  // Total slots: 7:00 - 24:00 = 17h = 34 half-hour slots
-  const TB_SLOT_COUNT = 34;
 
-  // Long-press / drag state
-  let tbDragStart = null;
-  let tbDragEnd = null;
-  let tbDragging = false;
-  let tbLongPressTimer = null;
-
-  function renderTimeBlock() {
-    // Update date label
-    const dateLabel = document.getElementById('tb-current-date');
-    if (dateLabel) {
-      const d = new Date(tbViewDate + 'T00:00:00');
-      const weekNames = ['日','一','二','三','四','五','六'];
-      const isToday = tbViewDate === todayKey();
-      dateLabel.textContent = `${d.getMonth()+1}月${d.getDate()}日 周${weekNames[d.getDay()]}${isToday ? '（今天）' : ''}`;
-    }
-
-    // Render wake/sleep UI
-    renderWakeSleepUI();
-
-    const timeline = document.getElementById('tb-timeline');
-    const blocks = getTimeBlocks().filter(b => b.date === tbViewDate).sort((a,b) => a.start.localeCompare(b.start));
-
-    // Build a map: slot index -> block info
-    const slotMap = new Array(TB_SLOT_COUNT).fill(null); // each element: null or { block, isStart, isEnd, isMid }
-    blocks.forEach(b => {
-      const startMin = timeToMinutes(b.start);
-      const endMin = timeToMinutes(b.end);
-      const startSlot = Math.max(0, Math.floor((startMin - 7 * 60) / 30));
-      const endSlot = Math.min(TB_SLOT_COUNT - 1, Math.ceil((endMin - 7 * 60) / 30) - 1);
-      for (let s = startSlot; s <= endSlot; s++) {
-        slotMap[s] = {
-          block: b,
-          isStart: s === startSlot,
-          isEnd: s === endSlot,
-          span: endSlot - startSlot + 1,
-        };
-      }
-    });
-
+  function buildTimelineHTML(slotMap) {
     let html = '<div class="tb-grid">';
     for (let s = 0; s < TB_SLOT_COUNT; s++) {
-      const timeStr = slotToTime(s);
       const isHour = s % 2 === 0;
-      const entry = slotMap[s];
-
+      const entry  = slotMap[s];
       html += `<div class="tb-slot${isHour ? ' tb-slot-hour' : ''}" data-slot="${s}">`;
-      html += `<span class="tb-slot-time">${isHour ? timeStr : ''}</span>`;
+      html += `<span class="tb-slot-time">${isHour ? slotToTime(s) : ''}</span>`;
 
       if (entry && entry.isStart) {
         const b = entry.block;
-        let blockColor = (TB_CATEGORIES[b.category] || TB_CATEGORIES.daily).color;
-        let tagLabel = '';
-        // If bound to a task with tags, use first tag color
-        if (b.bindType === 'task' && b.bindId) {
-          const t = state.tasks.find(x => x.id === b.bindId);
-          if (t && t.tags && t.tags.length > 0) {
-            const tag = getTag(t.tags[0]);
-            if (tag) { blockColor = tag.color; tagLabel = tag.name; }
-          }
-        }
-        // If bound to a habit with tags, use first tag color
-        if (b.bindType === 'habit' && b.bindId) {
-          const h = getHabits().find(x => x.id === b.bindId);
-          if (h && h.tags && h.tags.length > 0) {
-            const tag = getTag(h.tags[0]);
-            if (tag) { blockColor = tag.color; tagLabel = tag.name; }
-          }
-        }
-        const displayName = b.taskId ? ((state.tasks.find(t => t.id === b.taskId) || {}).name || b.name) : b.name;
-        const spanSlots = entry.span;
-        const heightPx = spanSlots * 36 - 2; // 36px per slot minus gap
-        html += `<div class="tb-slot-block" style="background:${blockColor};height:${heightPx}px" data-block-id="${b.id}">`;
+        const { color } = resolveBlockStyle(b);
+        const displayName = resolveBlockName(b);
+        const heightPx = entry.span * TB_SLOT_HEIGHT_PX - 2;
+        html += `<div class="tb-slot-block" style="background:${color};height:${heightPx}px" data-block-id="${b.id}">`;
         html += `<span class="tb-slot-block-name">${esc(displayName)}</span>`;
         html += `<span class="tb-slot-block-time">${b.start} - ${b.end}</span>`;
         html += `</div>`;
       } else if (!entry) {
         html += `<div class="tb-slot-empty" data-slot="${s}"></div>`;
       }
-
       html += `</div>`;
     }
     html += '</div>';
+    return html;
+  }
 
+  function renderTimeBlock() {
+    renderTbDateLabel();
+    renderWakeSleepUI();
+
+    const blocks = getBlocksForDate(tbState.viewDate);
+    tbState.slotMap = buildSlotMap(blocks);
+
+    const timeline = document.getElementById('tb-timeline');
     if (timeline) {
-      timeline.innerHTML = html;
+      timeline.innerHTML = buildTimelineHTML(tbState.slotMap);
       bindTimelineEvents(timeline);
     }
-
     renderTimeBlockSummary(blocks);
   }
 
+  // ---- Timeline events ----
   function bindTimelineEvents(timeline) {
-    // Click on filled block -> edit
+    // Click on filled block → edit
     timeline.querySelectorAll('.tb-slot-block').forEach(el => {
       el.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -2901,104 +2960,120 @@
       });
     });
 
-    // Click on empty slot -> add at that slot
+    // Click on empty slot → add
     timeline.querySelectorAll('.tb-slot-empty').forEach(el => {
-      el.addEventListener('click', (e) => {
-        if (tbDragging) return;
-        const slot = parseInt(el.dataset.slot);
-        openTimeBlockModalAtSlot(slot, slot);
+      el.addEventListener('click', () => {
+        if (tbState.drag.active) return;
+        openTimeBlockModalAtSlot(parseInt(el.dataset.slot));
       });
     });
 
-    // Long-press / drag on empty slots to select range
+    // Mouse/touch drag for range selection on empty slots
     const slots = timeline.querySelectorAll('.tb-slot');
     slots.forEach(slotEl => {
-      // Mouse events
+      const slot = parseInt(slotEl.dataset.slot);
+
+      // -- Mouse --
       slotEl.addEventListener('mousedown', (e) => {
-        const slot = parseInt(slotEl.dataset.slot);
-        if (slotMap_hasBlock(slot)) return;
-        tbDragStart = slot;
-        tbDragEnd = slot;
-        tbDragging = false;
+        if (tbState.slotMap[slot]) return;
+        tbState.drag.startSlot = slot;
+        tbState.drag.endSlot   = slot;
+        tbState.drag.active    = false;
         updateSlotSelection(timeline);
         e.preventDefault();
       });
       slotEl.addEventListener('mouseenter', () => {
-        if (tbDragStart === null) return;
-        const slot = parseInt(slotEl.dataset.slot);
-        tbDragEnd = slot;
-        tbDragging = true;
+        if (tbState.drag.startSlot === null) return;
+        tbState.drag.endSlot = slot;
+        tbState.drag.active  = true;
         updateSlotSelection(timeline);
       });
 
-      // Touch events
+      // -- Touch --
       slotEl.addEventListener('touchstart', (e) => {
-        const slot = parseInt(slotEl.dataset.slot);
-        if (slotMap_hasBlock(slot)) return;
-        tbDragStart = slot;
-        tbDragEnd = slot;
-        tbDragging = false;
-        tbLongPressTimer = setTimeout(() => {
-          tbDragging = true;
-          updateSlotSelection(timeline);
-        }, 300);
-      }, { passive: true });
-      slotEl.addEventListener('touchmove', (e) => {
-        if (tbDragStart === null) return;
-        clearTimeout(tbLongPressTimer);
+        if (tbState.slotMap[slot]) return;
         const touch = e.touches[0];
-        const el = document.elementFromPoint(touch.clientX, touch.clientY);
-        if (el) {
-          const s = el.closest('.tb-slot');
+        tbState.touch.startX    = touch.clientX;
+        tbState.touch.startY    = touch.clientY;
+        tbState.touch.locked    = false;
+        tbState.touch.scrolling = false;
+        tbState.drag.startSlot  = slot;
+        tbState.drag.endSlot    = slot;
+        tbState.drag.active     = false;
+        tbState.drag.timer = setTimeout(() => {
+          if (!tbState.touch.scrolling) {
+            tbState.touch.locked = true;
+            tbState.drag.active  = true;
+            updateSlotSelection(timeline);
+          }
+        }, TB_LONG_PRESS_MS);
+      }, { passive: true });
+
+      slotEl.addEventListener('touchmove', (e) => {
+        if (tbState.drag.startSlot === null || tbState.touch.scrolling) return;
+        const touch = e.touches[0];
+        const dx = Math.abs(touch.clientX - tbState.touch.startX);
+        const dy = Math.abs(touch.clientY - tbState.touch.startY);
+
+        if (!tbState.touch.locked) {
+          // Vertical dominant → scroll
+          if (dy > TB_SCROLL_THRESH && dy > dx * 1.5) {
+            tbState.touch.scrolling = true;
+            clearTimeout(tbState.drag.timer);
+            resetDragState();
+            clearSlotSelection(timeline);
+            return;
+          }
+          // Any movement → cancel long-press timer
+          if (dx > TB_MOVE_CANCEL || dy > TB_MOVE_CANCEL) {
+            clearTimeout(tbState.drag.timer);
+          }
+          return; // don't preventDefault until locked
+        }
+        // Locked — extend selection
+        const target = document.elementFromPoint(touch.clientX, touch.clientY);
+        if (target) {
+          const s = target.closest('.tb-slot');
           if (s) {
-            tbDragEnd = parseInt(s.dataset.slot);
-            tbDragging = true;
+            tbState.drag.endSlot = parseInt(s.dataset.slot);
             updateSlotSelection(timeline);
           }
         }
         e.preventDefault();
       }, { passive: false });
     });
-
-    // Global mouseup / touchend -> finalize selection
-    function handleDragEnd() {
-      clearTimeout(tbLongPressTimer);
-      if (tbDragStart !== null && tbDragging && tbDragEnd !== null) {
-        const from = Math.min(tbDragStart, tbDragEnd);
-        const to = Math.max(tbDragStart, tbDragEnd);
-        tbDragStart = null;
-        tbDragEnd = null;
-        tbDragging = false;
-        clearSlotSelection(timeline);
-        openTimeBlockModalAtSlot(from, to);
-      } else {
-        tbDragStart = null;
-        tbDragEnd = null;
-        tbDragging = false;
-        clearSlotSelection(timeline);
-      }
-    }
-    timeline._tbMouseUp = handleDragEnd;
-    document.addEventListener('mouseup', handleDragEnd);
-    document.addEventListener('touchend', handleDragEnd);
   }
 
-  function slotMap_hasBlock(slot) {
-    const blocks = getTimeBlocks().filter(b => b.date === tbViewDate);
-    for (const b of blocks) {
-      const startSlot = Math.max(0, Math.floor((timeToMinutes(b.start) - 7*60) / 30));
-      const endSlot = Math.min(TB_SLOT_COUNT - 1, Math.ceil((timeToMinutes(b.end) - 7*60) / 30) - 1);
-      if (slot >= startSlot && slot <= endSlot) return true;
+  /** Global drag-end handler — registered once at init, not per render */
+  function handleTimeBlockDragEnd() {
+    clearTimeout(tbState.drag.timer);
+    const { startSlot, endSlot, active } = tbState.drag;
+    const isTouchDrag = startSlot !== null && active && endSlot !== null && tbState.touch.locked;
+    const isMouseDrag = startSlot !== null && active && endSlot !== null && !tbState.touch.scrolling;
+
+    if (isTouchDrag || isMouseDrag) {
+      const from = Math.min(startSlot, endSlot);
+      const to   = Math.max(startSlot, endSlot);
+      resetDragState();
+      const timeline = document.getElementById('tb-timeline');
+      if (timeline) clearSlotSelection(timeline);
+      openTimeBlockModalAtSlot(from, to);
+    } else {
+      resetDragState();
+      const timeline = document.getElementById('tb-timeline');
+      if (timeline) clearSlotSelection(timeline);
     }
-    return false;
   }
+
+  // Register once (fixes event listener leak — B3)
+  document.addEventListener('mouseup',  handleTimeBlockDragEnd);
+  document.addEventListener('touchend', handleTimeBlockDragEnd);
 
   function updateSlotSelection(timeline) {
-    const from = Math.min(tbDragStart, tbDragEnd);
-    const to = Math.max(tbDragStart, tbDragEnd);
+    const from = Math.min(tbState.drag.startSlot, tbState.drag.endSlot);
+    const to   = Math.max(tbState.drag.startSlot, tbState.drag.endSlot);
     timeline.querySelectorAll('.tb-slot').forEach(el => {
-      const s = parseInt(el.dataset.slot);
-      el.classList.toggle('tb-slot-selecting', s >= from && s <= to);
+      el.classList.toggle('tb-slot-selecting', parseInt(el.dataset.slot) >= from && parseInt(el.dataset.slot) <= to);
     });
   }
 
@@ -3006,130 +3081,118 @@
     timeline.querySelectorAll('.tb-slot').forEach(el => el.classList.remove('tb-slot-selecting'));
   }
 
-  function openTimeBlockModalAtSlot(fromSlot, toSlot) {
-    const startTime = slotToTime(fromSlot);
-    const endTime = slotToTime(toSlot + 1); // +1 because end is exclusive
-    openTimeBlockModal(null, startTime, endTime);
-  }
-
+  // ---- Summary ----
   function renderTimeBlockSummary(blocks) {
-    const summary = document.getElementById('tb-summary');
-    if (!summary) return;
+    const container = document.getElementById('tb-summary');
+    if (!container) return;
     if (blocks.length === 0) {
-      summary.innerHTML = '<h3>今日统计</h3><p style="color:var(--text-muted);font-size:.85rem">暂无数据</p>';
+      container.innerHTML = '<h3>今日统计</h3><p style="color:var(--text-muted);font-size:.85rem">暂无数据</p>';
       return;
     }
-    // Aggregate by display label (category name or tag name)
+
     const labelTotals = {}; // { label: { mins, color } }
-    const bindInfo = [];
+    const bindRecords = [];
+
     blocks.forEach(b => {
       const dur = timeToMinutes(b.end) - timeToMinutes(b.start);
       if (dur <= 0) return;
 
-      let labelKey, labelColor;
-      // Determine display label: if bound with tags, use tag; otherwise use category
+      const { color, tagLabel } = resolveBlockStyle(b);
+
+      // Collect binding info
       if (b.bindType === 'task' && b.bindId) {
         const t = state.tasks.find(x => x.id === b.bindId);
-        if (t && t.tags && t.tags.length > 0) {
-          const tag = getTag(t.tags[0]);
-          if (tag) { labelKey = tag.name; labelColor = tag.color; }
-        }
-        if (t) bindInfo.push({ name: t.name, icon: '\uD83D\uDCCB', color: labelColor || '#6366f1', time: b.start + '-' + b.end });
+        if (t) bindRecords.push({ name: t.name, icon: '\uD83D\uDCCB', color, time: b.start + '-' + b.end });
       } else if (b.bindType === 'habit' && b.bindId) {
         const h = getHabits().find(x => x.id === b.bindId);
-        if (h && h.tags && h.tags.length > 0) {
-          const tag = getTag(h.tags[0]);
-          if (tag) { labelKey = tag.name; labelColor = tag.color; }
-        }
-        if (h) bindInfo.push({ name: h.name, icon: h.icon || '\u2705', color: labelColor || '#22c55e', time: b.start + '-' + b.end });
+        if (h) bindRecords.push({ name: h.name, icon: h.icon || '\u2705', color, time: b.start + '-' + b.end });
       }
-      // Fallback to category
-      if (!labelKey) {
-        const cat = TB_CATEGORIES[b.category] || TB_CATEGORIES.daily;
-        labelKey = cat.label;
-        labelColor = cat.color;
-      }
-      if (!labelTotals[labelKey]) labelTotals[labelKey] = { mins: 0, color: labelColor };
-      labelTotals[labelKey].mins += dur;
+
+      if (!labelTotals[tagLabel]) labelTotals[tagLabel] = { mins: 0, color };
+      labelTotals[tagLabel].mins += dur;
     });
 
     let html = '<h3>今日统计</h3><div class="tb-summary-grid">';
-    for (const [label, info] of Object.entries(labelTotals).sort((a,b) => b[1].mins - a[1].mins)) {
-      const hrs = Math.floor(info.mins / 60);
-      const m = info.mins % 60;
-      const timeStr = hrs > 0 ? `${hrs}h${m > 0 ? m + 'm' : ''}` : `${m}m`;
-      html += `<div class="tb-summary-item"><span class="tb-summary-dot" style="background:${info.color}"></span><span class="tb-summary-label">${esc(label)}</span><span class="tb-summary-val">${timeStr}</span></div>`;
+    for (const [label, info] of Object.entries(labelTotals).sort((a, b) => b[1].mins - a[1].mins)) {
+      html += `<div class="tb-summary-item"><span class="tb-summary-dot" style="background:${info.color}"></span>`
+            + `<span class="tb-summary-label">${esc(label)}</span>`
+            + `<span class="tb-summary-val">${formatDuration(info.mins)}</span></div>`;
     }
-    const totalMin = Object.values(labelTotals).reduce((s,v) => s + v.mins, 0);
-    const totalH = Math.floor(totalMin / 60);
-    const totalM = totalMin % 60;
-    html += `<div class="tb-summary-item" style="border-color:var(--accent)"><span class="tb-summary-dot" style="background:var(--accent)"></span><span class="tb-summary-label">合计</span><span class="tb-summary-val">${totalH}h${totalM > 0 ? totalM + 'm' : ''}</span></div>`;
+    const totalMin = Object.values(labelTotals).reduce((s, v) => s + v.mins, 0);
+    html += `<div class="tb-summary-item" style="border-color:var(--accent)"><span class="tb-summary-dot" style="background:var(--accent)"></span>`
+          + `<span class="tb-summary-label">合计</span>`
+          + `<span class="tb-summary-val">${formatDuration(totalMin)}</span></div>`;
     html += '</div>';
 
-    // Binding info section
-    if (bindInfo.length > 0) {
+    if (bindRecords.length > 0) {
       html += '<h3 style="margin-top:.8rem">关联记录</h3><div class="tb-summary-grid">';
-      bindInfo.forEach(bi => {
-        html += `<div class="tb-summary-item"><span class="tb-summary-dot" style="background:${bi.color}"></span><span class="tb-summary-label">${bi.icon} ${esc(bi.name)}</span><span class="tb-summary-val">${bi.time}</span></div>`;
+      bindRecords.forEach(r => {
+        html += `<div class="tb-summary-item"><span class="tb-summary-dot" style="background:${r.color}"></span>`
+              + `<span class="tb-summary-label">${r.icon} ${esc(r.name)}</span>`
+              + `<span class="tb-summary-val">${r.time}</span></div>`;
       });
       html += '</div>';
     }
+    container.innerHTML = html;
+  }
 
-    summary.innerHTML = html;
+  // ---- Modal: open / render / save ----
+  function openTimeBlockModalAtSlot(fromSlot, toSlot) {
+    if (toSlot === undefined) toSlot = fromSlot;
+    openTimeBlockModal(null, slotToTime(fromSlot), slotToTime(toSlot + 1));
   }
 
   function openTimeBlockModal(blockId, presetStart, presetEnd) {
-    const overlay = document.getElementById('tb-modal-overlay');
-    const titleEl = document.getElementById('tb-modal-title');
+    const overlay   = document.getElementById('tb-modal-overlay');
+    const titleEl   = document.getElementById('tb-modal-title');
     const nameInput = document.getElementById('tb-edit-name');
-    const startInput = document.getElementById('tb-edit-start');
-    const endInput = document.getElementById('tb-edit-end');
+    const startInput= document.getElementById('tb-edit-start');
+    const endInput  = document.getElementById('tb-edit-end');
     const deleteBtn = document.getElementById('tb-modal-delete');
 
     if (blockId) {
-      const block = getTimeBlocks().find(b => b.id === blockId);
+      const block = (state.timeBlocks || []).find(b => b.id === blockId);
       if (!block) return;
-      editingBlockId = blockId;
-      titleEl.textContent = '编辑时间块';
-      nameInput.value = block.name;
-      startInput.value = block.start;
-      endInput.value = block.end;
+      tbState.editingId = blockId;
+      titleEl.textContent    = '编辑时间块';
+      nameInput.value        = block.name;
+      startInput.value       = block.start;
+      endInput.value         = block.end;
       deleteBtn.style.display = '';
-      tbCatBindState = {
+      tbState.formBind = {
         category: block.category || 'daily',
         bindType: block.bindType || 'none',
-        bindId: block.bindId || null
+        bindId:   block.bindId   || null,
       };
     } else {
-      editingBlockId = null;
-      titleEl.textContent = '添加时间块';
-      nameInput.value = '';
-      startInput.value = presetStart || '09:00';
-      endInput.value = presetEnd || '10:00';
+      tbState.editingId = null;
+      titleEl.textContent    = '添加时间块';
+      nameInput.value        = '';
+      startInput.value       = presetStart || '09:00';
+      endInput.value         = presetEnd   || '10:00';
       deleteBtn.style.display = 'none';
-      tbCatBindState = { category: 'daily', bindType: 'none', bindId: null };
+      tbState.formBind = { category: 'daily', bindType: 'none', bindId: null };
     }
 
     renderTbBindChips();
-    renderTbBindTargets();
     renderTbCatChips();
+    renderTbBindTargets();
     updateTbFormVisibility();
-
     overlay.classList.remove('hidden');
   }
 
-  // Render category chips (日常/娱乐) — only visible when bindType === 'none'
+  // ---- Modal: chip renderers ----
   function renderTbCatChips() {
     const container = document.getElementById('tb-cat-chips');
     if (!container) return;
     container.innerHTML = '';
     TB_PRIMARY_CATS.forEach(key => {
-      const cat = TB_CATEGORIES[key];
+      const cat  = TB_CATEGORIES[key];
       const chip = document.createElement('span');
-      chip.className = 'tb-chip' + (tbCatBindState.category === key ? ' selected' : '');
+      chip.className = 'tb-chip' + (tbState.formBind.category === key ? ' selected' : '');
       chip.innerHTML = `<span class="tb-chip-dot" style="background:${cat.color}"></span>${cat.label}`;
       chip.addEventListener('click', () => {
-        tbCatBindState.category = key;
+        tbState.formBind.category = key;
         renderTbCatChips();
       });
       container.appendChild(chip);
@@ -3142,20 +3205,19 @@
     container.innerHTML = '';
     Object.entries(TB_BIND_TYPES).forEach(([key, bt]) => {
       const chip = document.createElement('span');
-      chip.className = 'tb-chip' + (tbCatBindState.bindType === key ? ' selected' : '');
+      chip.className = 'tb-chip' + (tbState.formBind.bindType === key ? ' selected' : '');
       chip.textContent = bt.icon + ' ' + bt.label;
       chip.addEventListener('click', () => {
-        tbCatBindState.bindType = key;
+        tbState.formBind.bindType = key;
+        tbState.formBind.bindId   = null; // always clear target on type switch
         if (key === 'none') {
-          tbCatBindState.bindId = null;
-          // Default to 'daily' when switching to no-bind
-          if (!tbCatBindState.category || tbCatBindState.category === 'untracked') {
-            tbCatBindState.category = 'daily';
+          if (!tbState.formBind.category || tbState.formBind.category === 'untracked') {
+            tbState.formBind.category = 'daily';
           }
         }
         renderTbBindChips();
-        renderTbBindTargets();
         renderTbCatChips();
+        renderTbBindTargets();
         updateTbFormVisibility();
       });
       container.appendChild(chip);
@@ -3163,85 +3225,60 @@
   }
 
   function renderTbBindTargets() {
-    const row = document.getElementById('tb-bind-target-row');
-    const list = document.getElementById('tb-bind-target-list');
+    const list  = document.getElementById('tb-bind-target-list');
     const label = document.getElementById('tb-bind-target-label');
-    if (!row || !list) return;
+    if (!list) return;
+    list.innerHTML = '';
 
-    if (tbCatBindState.bindType === 'none') {
-      row.style.display = 'none';
+    const { bindType } = tbState.formBind;
+    if (bindType === 'none') return; // visibility handled by updateTbFormVisibility
+
+    const isTask = bindType === 'task';
+    label.textContent = isTask ? '选择任务' : '选择打卡';
+    const items = isTask ? state.tasks.filter(t => !t.done) : getHabits();
+
+    if (items.length === 0) {
+      list.innerHTML = `<div style="color:var(--text-muted);font-size:.82rem;padding:.5rem">暂无${isTask ? '活跃任务' : '习惯'}</div>`;
       return;
     }
-    row.style.display = '';
-
-    if (tbCatBindState.bindType === 'task') {
-      label.textContent = '选择任务';
-      const tasks = state.tasks.filter(t => !t.done);
-      list.innerHTML = '';
-      if (tasks.length === 0) {
-        list.innerHTML = '<div style="color:var(--text-muted);font-size:.82rem;padding:.5rem">暂无活跃任务</div>';
-        return;
-      }
-      tasks.forEach(t => {
-        const el = document.createElement('div');
-        el.className = 'tb-bind-target-item' + (tbCatBindState.bindId === t.id ? ' selected' : '');
-        const tagChips = renderTagChips(t.tags);
-        el.innerHTML = `<span class="tbti-icon">\uD83D\uDCCB</span><span class="tbti-name">${esc(t.name)}</span><span class="tbti-tags">${tagChips}</span>`;
-        el.addEventListener('click', () => {
-          tbCatBindState.bindId = t.id;
-          renderTbBindTargets();
-          updateTbFormVisibility();
-        });
-        list.appendChild(el);
+    items.forEach(item => {
+      const el = document.createElement('div');
+      el.className = 'tb-bind-target-item' + (tbState.formBind.bindId === item.id ? ' selected' : '');
+      const icon     = isTask ? '\uD83D\uDCCB' : (item.icon || '\uD83D\uDD04');
+      const tagChips = renderTagChips(item.tags || []);
+      const meta     = !isTask ? `<span class="tbti-meta">${item.type === 'duration' ? '时长' : '次数'}</span>` : '';
+      el.innerHTML = `<span class="tbti-icon">${icon}</span><span class="tbti-name">${esc(item.name)}</span><span class="tbti-tags">${tagChips}</span>${meta}`;
+      el.addEventListener('click', () => {
+        tbState.formBind.bindId = item.id;
+        renderTbBindTargets();
       });
-    } else if (tbCatBindState.bindType === 'habit') {
-      label.textContent = '选择打卡';
-      const habits = getHabits();
-      list.innerHTML = '';
-      if (habits.length === 0) {
-        list.innerHTML = '<div style="color:var(--text-muted);font-size:.82rem;padding:.5rem">暂无习惯</div>';
-        return;
-      }
-      habits.forEach(h => {
-        const el = document.createElement('div');
-        el.className = 'tb-bind-target-item' + (tbCatBindState.bindId === h.id ? ' selected' : '');
-        const tagChips = renderTagChips(h.tags || []);
-        el.innerHTML = `<span class="tbti-icon">${h.icon || '\uD83D\uDD04'}</span><span class="tbti-name">${esc(h.name)}</span><span class="tbti-tags">${tagChips}</span><span class="tbti-meta">${h.type === 'duration' ? '时长' : '次数'}</span>`;
-        el.addEventListener('click', () => {
-          tbCatBindState.bindId = h.id;
-          renderTbBindTargets();
-          updateTbFormVisibility();
-        });
-        list.appendChild(el);
-      });
-    }
+      list.appendChild(el);
+    });
   }
 
-  // Controls visibility of category row and name row based on bind state
-  // 关联任务/打卡 → 不显示分类选择，不显示名称输入
-  // 不关联 → 显示分类选择，显示名称输入
+  /** Single source of truth for modal section visibility */
   function updateTbFormVisibility() {
-    const catRow = document.getElementById('tb-cat-row');
-    const nameRow = document.getElementById('tb-name-row');
-    const isBound = tbCatBindState.bindType !== 'none';
-    if (catRow) catRow.style.display = isBound ? 'none' : '';
-    if (nameRow) nameRow.style.display = isBound ? 'none' : '';
+    const catRow       = document.getElementById('tb-cat-row');
+    const nameRow      = document.getElementById('tb-name-row');
+    const bindTargetRow= document.getElementById('tb-bind-target-row');
+    const isBound = tbState.formBind.bindType !== 'none';
+    if (catRow)        catRow.style.display        = isBound ? 'none' : '';
+    if (nameRow)       nameRow.style.display       = isBound ? 'none' : '';
+    if (bindTargetRow) bindTargetRow.style.display = isBound ? ''     : 'none';
   }
 
-  // Time block modal events
+  // ---- Modal: save / delete / events ----
   const tbModalOverlay = document.getElementById('tb-modal-overlay');
   setupModalClose(tbModalOverlay, document.getElementById('tb-modal-close'));
 
   document.getElementById('tb-modal-save').addEventListener('click', () => {
-    let name = document.getElementById('tb-edit-name').value.trim();
+    let name    = document.getElementById('tb-edit-name').value.trim();
     const start = document.getElementById('tb-edit-start').value;
-    const end = document.getElementById('tb-edit-end').value;
+    const end   = document.getElementById('tb-edit-end').value;
 
-    const category = tbCatBindState.category || 'daily';
-    const bindType = tbCatBindState.bindType || 'none';
-    const bindId = tbCatBindState.bindId || null;
+    const { category, bindType, bindId } = tbState.formBind;
 
-    // Auto-derive name from bound target
+    // Auto-derive name & legacy taskId from bound target
     let taskId = null;
     if (bindType === 'task' && bindId) {
       const t = state.tasks.find(x => x.id === bindId);
@@ -3251,31 +3288,30 @@
       if (h) name = h.name;
     }
 
-    if (!name) { alert('请输入活动名称或关联任务/打卡'); return; }
+    if (!name)  { alert('请输入活动名称或关联任务/打卡'); return; }
     if (!start || !end) { alert('请填写开始和结束时间'); return; }
     if (timeToMinutes(end) <= timeToMinutes(start)) { alert('结束时间必须晚于开始时间'); return; }
 
-    // Reset bindType if no target selected
+    // If user chose bind but never picked a target, fall back to unbound
     const finalBindType = (bindType !== 'none' && !bindId) ? 'none' : bindType;
-    const finalBindId = finalBindType === 'none' ? null : bindId;
+    const finalBindId   = finalBindType === 'none' ? null : bindId;
+    const finalCategory = category || 'daily';
 
-    if (editingBlockId) {
-      const block = getTimeBlocks().find(b => b.id === editingBlockId);
+    if (tbState.editingId) {
+      const block = (state.timeBlocks || []).find(b => b.id === tbState.editingId);
       if (block) {
-        block.name = name;
-        block.taskId = taskId;
-        block.category = category;
-        block.bindType = finalBindType;
-        block.bindId = finalBindId;
-        block.start = start;
-        block.end = end;
+        Object.assign(block, {
+          name, taskId, category: finalCategory,
+          bindType: finalBindType, bindId: finalBindId, start, end,
+        });
       }
     } else {
       if (!state.timeBlocks) state.timeBlocks = [];
       state.timeBlocks.push({
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
-        date: tbViewDate,
-        name, taskId, category, bindType: finalBindType, bindId: finalBindId, start, end,
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        date: tbState.viewDate,
+        name, taskId, category: finalCategory,
+        bindType: finalBindType, bindId: finalBindId, start, end,
       });
     }
     saveState();
@@ -3284,47 +3320,41 @@
   });
 
   document.getElementById('tb-modal-delete').addEventListener('click', () => {
-    if (!editingBlockId) return;
+    if (!tbState.editingId) return;
     if (confirm('删除该时间块？')) {
-      state.timeBlocks = (state.timeBlocks || []).filter(b => b.id !== editingBlockId);
+      state.timeBlocks = (state.timeBlocks || []).filter(b => b.id !== tbState.editingId);
       saveState();
       tbModalOverlay.classList.add('hidden');
       renderTimeBlock();
     }
   });
 
+  // ---- Date navigation ----
+  function navigateDate(offset) {
+    const d = new Date(tbState.viewDate + 'T00:00:00');
+    d.setDate(d.getDate() + offset);
+    tbState.viewDate = localDateKey(d);
+    renderTimeBlock();
+  }
   document.getElementById('tb-add-block').addEventListener('click', () => openTimeBlockModal(null));
-
-  document.getElementById('tb-prev-day').addEventListener('click', () => {
-    const d = new Date(tbViewDate + 'T00:00:00');
-    d.setDate(d.getDate() - 1);
-    tbViewDate = localDateKey(d);
-    renderTimeBlock();
-  });
-
-  document.getElementById('tb-next-day').addEventListener('click', () => {
-    const d = new Date(tbViewDate + 'T00:00:00');
-    d.setDate(d.getDate() + 1);
-    tbViewDate = localDateKey(d);
-    renderTimeBlock();
-  });
-
+  document.getElementById('tb-prev-day').addEventListener('click',  () => navigateDate(-1));
+  document.getElementById('tb-next-day').addEventListener('click',  () => navigateDate(+1));
   document.getElementById('tb-today-btn').addEventListener('click', () => {
-    tbViewDate = todayKey();
+    tbState.viewDate = todayKey();
     renderTimeBlock();
   });
 
-  // Wake/Sleep time inputs
+  // ---- Wake/Sleep inputs ----
   document.getElementById('tb-wake-time').addEventListener('change', function() {
-    const ws = getWakeSleep(tbViewDate);
+    const ws = getWakeSleep(tbState.viewDate);
     ws.wake = this.value;
-    setWakeSleep(tbViewDate, ws.wake, ws.sleep);
+    setWakeSleep(tbState.viewDate, ws.wake, ws.sleep);
     renderWakeSleepUI();
   });
   document.getElementById('tb-sleep-time').addEventListener('change', function() {
-    const ws = getWakeSleep(tbViewDate);
+    const ws = getWakeSleep(tbState.viewDate);
     ws.sleep = this.value;
-    setWakeSleep(tbViewDate, ws.wake, ws.sleep);
+    setWakeSleep(tbState.viewDate, ws.wake, ws.sleep);
     renderWakeSleepUI();
   });
 

@@ -223,33 +223,33 @@
         <button class="modal-close" id="tb-modal-close">&times;</button>
       </div>
       <div class="modal-body">
-        <!-- Activity name -->
+        <!-- Step 1: Binding type (关联选择) — always shown first -->
         <div class="form-row">
-          <label>活动名称</label>
-          <input type="text" id="tb-edit-name" placeholder="如：阅读、开会、编程">
-        </div>
-        <!-- Category: inline chips -->
-        <div class="form-row">
-          <label>分类</label>
-          <div class="tb-cat-chips" id="tb-cat-chips">
-            <!-- JS renders 3 chips: 日常/娱乐/无记录 -->
-          </div>
-        </div>
-        <!-- Binding type: inline selector -->
-        <div class="form-row">
-          <label>关联</label>
+          <label>是否关联</label>
           <div class="tb-bind-chips" id="tb-bind-chips">
             <!-- JS renders 3 chips: 不关联/关联任务/关联打卡 -->
           </div>
         </div>
-        <!-- Binding target (conditional) -->
+        <!-- Step 2a: Binding target (conditional, shown when task/habit selected) -->
         <div class="form-row" id="tb-bind-target-row" style="display:none">
           <label id="tb-bind-target-label">选择目标</label>
           <div class="tb-bind-target-list" id="tb-bind-target-list">
             <!-- JS renders task or habit list -->
           </div>
         </div>
-        <!-- Time inputs -->
+        <!-- Step 2b: Category (shown only when bindType === 'none') -->
+        <div class="form-row" id="tb-cat-row">
+          <label>分类</label>
+          <div class="tb-cat-chips" id="tb-cat-chips">
+            <!-- JS renders chips: 日常/娱乐 -->
+          </div>
+        </div>
+        <!-- Step 3: Activity name (shown only when bindType === 'none') -->
+        <div class="form-row" id="tb-name-row">
+          <label>活动名称</label>
+          <input type="text" id="tb-edit-name" placeholder="如：阅读、开会、编程">
+        </div>
+        <!-- Step 4: Time inputs — always shown last -->
         <div class="form-row tb-time-row">
           <div class="tb-time-field">
             <label>开始</label>
