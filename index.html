@@ -17,7 +17,8 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<!-- SIDEBAR NAV -->
+
+<!-- SIDEBAR NAV (desktop) -->
 <nav id="sidebar">
   <div class="sidebar-brand">
     <div class="brand-icon">心</div>
@@ -25,37 +26,17 @@
     <span class="brand-drops" id="sidebar-drops" title="专注水滴">💧 <span id="sidebar-drops-num">0</span></span>
   </div>
   <ul class="nav-list">
-    <li class="nav-item active" data-view="dashboard">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-      <span>仪表盘</span>
-    </li>
-    <li class="nav-item" data-view="dump">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18m-6-6l6 6 6-6"/></svg>
-      <span>倒空大脑</span>
-    </li>
-    <li class="nav-item" data-view="board">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-      <span>任务看板</span>
-    </li>
-    <li class="nav-item" data-view="gantt">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z" stroke="none"/><rect x="3" y="3" width="18" height="18" rx="2"/><rect x="6" y="7" width="6" height="2" rx="1" fill="currentColor"/><rect x="10" y="11" width="8" height="2" rx="1" fill="currentColor"/><rect x="7" y="15" width="5" height="2" rx="1" fill="currentColor"/></svg>
-      <span>甘特图</span>
-    </li>
-    <li class="nav-item" data-view="timeblock">
+    <li class="nav-item active" data-view="today">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      <span>时间记录</span>
+      <span>今日</span>
     </li>
-    <li class="nav-item" data-view="summary">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-      <span>近期总结</span>
+    <li class="nav-item" data-view="tasks">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      <span>任务</span>
     </li>
-    <li class="nav-item" data-view="habits">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4m-7-7H1m22 0h-4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/><circle cx="12" cy="12" r="4"/></svg>
-      <span>长期习惯</span>
-    </li>
-    <li class="nav-item" data-view="shop">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
-      <span>消费商城</span>
+    <li class="nav-item" data-view="review">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <span>回顾</span>
     </li>
   </ul>
   <div class="nav-bottom">
@@ -77,380 +58,169 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
   </button>
   <div class="brand-icon-sm">心</div>
-  <span id="mobile-title">仪表盘</span>
+  <span id="mobile-title">今日</span>
 </header>
 
-<!-- OVERLAY -->
+<!-- OVERLAY for mobile sidebar -->
 <div id="overlay"></div>
 
-<!-- MAIN CONTENT -->
+<!-- SYNC INDICATOR -->
+<div id="sync-indicator" class="sync-indicator" title="同步状态">
+  <span class="sync-dot sync-ok"></span>
+</div>
+
+<!-- ============ MAIN CONTENT ============ -->
 <main id="main-content">
 
-  <!-- VIEW: DASHBOARD -->
-  <section id="view-dashboard" class="view active">
-    <div class="dash-greeting">
-      <h1 id="dash-greeting-text">早上好</h1>
-      <p class="dash-date" id="dash-date"></p><button id="btn-manual-refresh" class="btn-manual-refresh" title="手动刷新每日数据"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+  <!-- ====== VIEW: TODAY ====== -->
+  <section id="view-today" class="view active">
+    <div class="today-header">
+      <div>
+        <h1 id="today-greeting">早上好</h1>
+        <p class="today-date" id="today-date"></p>
+      </div>
+      <div class="today-drops-badge" id="today-drops-badge" title="水滴余额">💧 <strong id="today-drops-num">0</strong></div>
     </div>
-    <div class="dash-quote" id="dash-quote"></div>
-    <div class="dash-stats-grid">
-      <div class="dash-stat-card">
-        <div class="dash-stat-num" id="dash-undone">0</div>
-        <div class="dash-stat-label">待完成</div>
+
+    <!-- Progress ring -->
+    <div class="today-progress-section">
+      <div class="progress-ring-wrap">
+        <svg class="progress-ring" viewBox="0 0 120 120">
+          <circle class="progress-ring-bg" cx="60" cy="60" r="52"/>
+          <circle class="progress-ring-fill" id="progress-ring-fill" cx="60" cy="60" r="52"/>
+        </svg>
+        <div class="progress-ring-text">
+          <span class="progress-ring-num" id="progress-done">0</span>
+          <span class="progress-ring-label">已完成</span>
+        </div>
       </div>
-      <div class="dash-stat-card">
-        <div class="dash-stat-num" id="dash-today-count">0</div>
-        <div class="dash-stat-label">今日待办</div>
-      </div>
-      <div class="dash-stat-card dash-stat-accent">
-        <div class="dash-stat-num" id="dash-focus-min">0</div>
-        <div class="dash-stat-label">今日完成</div>
-      </div>
-      <div class="dash-stat-card dash-stat-drops">
-        <div class="dash-stat-num" id="dash-drops">💧 0</div>
-        <div class="dash-stat-label">专注水滴</div>
+      <div class="today-stats">
+        <div class="today-stat"><span class="today-stat-num" id="stat-pending">0</span><span class="today-stat-label">待完成</span></div>
+        <div class="today-stat"><span class="today-stat-num" id="stat-total">0</span><span class="today-stat-label">总任务</span></div>
+        <div class="today-stat today-stat-accent"><span class="today-stat-num" id="stat-drops-today">0</span><span class="today-stat-label">今日水滴</span></div>
       </div>
     </div>
 
-    <!-- Quick Links -->
-    <div class="dash-section" id="dash-links-section">
-      <h3>常用链接</h3>
-      <div id="dash-links" class="dash-links"></div>
+    <!-- Today's tasks -->
+    <div class="today-section">
+      <div class="section-header">
+        <h2>今日任务</h2>
+        <button id="btn-manual-refresh" class="btn-icon-sm" title="刷新"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+      </div>
+      <div id="today-task-list" class="today-task-list"></div>
     </div>
 
-    <div class="dash-section">
-      <h3>今日任务</h3>
-      <div id="dash-today-tasks" class="dash-task-list"></div>
+    <!-- Today's time blocks -->
+    <div class="today-section">
+      <div class="section-header">
+        <h2>时间安排</h2>
+        <button id="btn-add-timeblock-today" class="btn-icon-sm" title="添加时间块"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+      </div>
+      <div id="today-timeblocks" class="today-timeblock-list"></div>
+    </div>
+
+    <!-- Habits -->
+    <div class="today-section">
+      <div class="section-header">
+        <h2>习惯打卡</h2>
+        <button id="btn-add-habit-today" class="btn-icon-sm" title="添加习惯"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+      </div>
+      <div id="today-habits" class="today-habits-grid"></div>
     </div>
   </section>
 
-  <!-- VIEW: DUMP -->
-  <section id="view-dump" class="view">
+  <!-- ====== VIEW: TASKS ====== -->
+  <section id="view-tasks" class="view">
     <div class="view-header">
-      <h1>倒空大脑</h1>
-      <p class="view-desc">把脑子里所有的事都写下来，不用管顺序，AI帮你理清楚。</p>
-    </div>
-    <div class="dump-area">
-      <textarea id="dump-input" placeholder="把你要做的事一股脑写在这里...&#10;&#10;比如：&#10;- 写周报&#10;- 回复客户邮件&#10;- 看完那本书的第三章&#10;- 约牙医&#10;- 学习 Python&#10;- 整理房间"></textarea>
-      <div class="dump-actions">
-        <button id="btn-analyze" class="btn-primary">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 22l-.75-12.07A4.001 4.001 0 0 1 12 2z"/></svg>
-          AI 分析
-        </button>
-        <button id="btn-add-manual" class="btn-secondary">手动添加</button>
-      </div>
-      <div id="ai-loading" class="ai-loading hidden">
-        <div class="loading-spinner"></div>
-        <span>AI 正在分析你的任务...</span>
-      </div>
-    </div>
-  </section>
-
-  <!-- VIEW: BOARD -->
-  <section id="view-board" class="view">
-    <div class="view-header">
-      <h1>任务看板</h1>
-      <p class="view-desc">按优先级排列，一眼看清轻重缓急。</p>
-      <div class="board-filters" id="board-filters">
-        <!-- Rendered by JS (tag-based filters) -->
-      </div>
-    </div>
-    <div class="board-list" id="board-list">
-      <!-- Rendered by JS -->
-    </div>
-  </section>
-
-  <!-- VIEW: GANTT -->
-  <section id="view-gantt" class="view">
-    <div class="view-header">
-      <h1>甘特图</h1>
-      <p class="view-desc">以时间轴查看任务分布，洞察未来两周的安排。</p>
-    </div>
-    <div class="gantt-container" id="gantt-container">
-      <!-- Rendered by JS -->
-    </div>
-  </section>
-
-  <!-- VIEW: TIME BLOCK -->
-  <section id="view-timeblock" class="view">
-    <div class="view-header">
-      <h1>时间记录</h1>
-      <p class="view-desc">记录每个时间块的用途，可视化你的一天。</p>
+      <h1>任务</h1>
     </div>
 
-    <!-- 起床/睡觉时间录入 -->
-    <div class="tb-sleep-tracker" id="tb-sleep-tracker">
-      <div class="tb-sleep-card">
-        <span class="tb-sleep-icon">🌅</span>
-        <span class="tb-sleep-label">起床</span>
-        <input type="time" id="tb-wake-time" class="tb-sleep-input" title="起床时间">
-      </div>
-      <div class="tb-sleep-card">
-        <span class="tb-sleep-icon">🌙</span>
-        <span class="tb-sleep-label">睡觉</span>
-        <input type="time" id="tb-sleep-time" class="tb-sleep-input" title="睡觉时间">
-      </div>
-      <div class="tb-sleep-summary" id="tb-sleep-summary"></div>
-    </div>
-
-    <div class="tb-controls">
-      <div class="tb-date-nav">
-        <button id="tb-prev-day" class="btn-icon" title="前一天"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><polyline points="15 18 9 12 15 6"/></svg></button>
-        <span id="tb-current-date" class="tb-date-label"></span>
-        <button id="tb-next-day" class="btn-icon" title="后一天"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><polyline points="9 18 15 12 9 6"/></svg></button>
-        <button id="tb-today-btn" class="btn-secondary" style="margin-left:.5rem;font-size:.78rem;padding:.3rem .6rem">今天</button>
-      </div>
-      <button id="tb-add-block" class="btn-primary">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        添加时间块
+    <!-- Brain Dump (collapsible) -->
+    <div class="dump-panel" id="dump-panel">
+      <button id="dump-toggle" class="dump-toggle-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 22l-.75-12.07A4.001 4.001 0 0 1 12 2z"/></svg>
+        倒空大脑
+        <svg class="dump-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
-    </div>
-    <div class="tb-timeline-wrap">
-      <div class="tb-timeline" id="tb-timeline">
-        <!-- Rendered by JS -->
+      <div class="dump-body" id="dump-body" style="display:none">
+        <textarea id="dump-input" placeholder="把你要做的事一股脑写在这里...&#10;&#10;比如：&#10;- 写周报&#10;- 回复客户邮件&#10;- 约牙医"></textarea>
+        <div class="dump-actions">
+          <button id="btn-analyze" class="btn-primary btn-sm">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 22l-.75-12.07A4.001 4.001 0 0 1 12 2z"/></svg>
+            AI 分析
+          </button>
+          <button id="btn-add-manual" class="btn-secondary btn-sm">手动添加</button>
+        </div>
+        <div id="ai-loading" class="ai-loading hidden">
+          <div class="loading-spinner"></div>
+          <span>AI 正在分析...</span>
+        </div>
       </div>
     </div>
-    <div class="tb-summary" id="tb-summary">
-      <!-- Rendered by JS -->
+
+    <!-- Quick add -->
+    <div class="quick-add-bar">
+      <input type="text" id="quick-add-input" placeholder="快速添加任务，按回车确认">
+      <button id="btn-quick-add" class="btn-primary btn-sm">添加</button>
     </div>
+
+    <!-- Tag filters -->
+    <div class="board-filters" id="board-filters"></div>
+
+    <!-- Task board -->
+    <div class="board-list" id="board-list"></div>
   </section>
 
-  <!-- TIME BLOCK ADD/EDIT MODAL -->
-  <div id="tb-modal-overlay" class="modal-overlay hidden">
-    <div class="modal" style="max-width:400px">
-      <div class="modal-header">
-        <h2 id="tb-modal-title">添加时间块</h2>
-        <button class="modal-close" id="tb-modal-close">&times;</button>
-      </div>
-      <div class="modal-body">
-        <!-- Step 1: Binding type (关联选择) — always shown first -->
-        <div class="form-row">
-          <label>是否关联</label>
-          <div class="tb-bind-chips" id="tb-bind-chips">
-            <!-- JS renders 3 chips: 不关联/关联任务/关联打卡 -->
-          </div>
-        </div>
-        <!-- Step 2a: Binding target (conditional, shown when task/habit selected) -->
-        <div class="form-row" id="tb-bind-target-row" style="display:none">
-          <label id="tb-bind-target-label">选择目标</label>
-          <div class="tb-bind-target-list" id="tb-bind-target-list">
-            <!-- JS renders task or habit list -->
-          </div>
-        </div>
-        <!-- Step 2b: Category (shown only when bindType === 'none') -->
-        <div class="form-row" id="tb-cat-row">
-          <label>分类</label>
-          <div class="tb-cat-chips" id="tb-cat-chips">
-            <!-- JS renders chips: 日常/娱乐 -->
-          </div>
-        </div>
-        <!-- Step 3: Activity name (shown only when bindType === 'none') -->
-        <div class="form-row" id="tb-name-row">
-          <label>活动名称</label>
-          <input type="text" id="tb-edit-name" placeholder="如：阅读、开会、编程">
-        </div>
-        <!-- Step 4: Time inputs — always shown last -->
-        <div class="form-row tb-time-row">
-          <div class="tb-time-field">
-            <label>开始</label>
-            <input type="time" id="tb-edit-start" value="09:00">
-          </div>
-          <div class="tb-time-field">
-            <label>结束</label>
-            <input type="time" id="tb-edit-end" value="10:00">
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button id="tb-modal-delete" class="btn-danger" style="display:none">删除</button>
-        <button id="tb-modal-save" class="btn-primary">保存</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- VIEW: SUMMARY (近期总结) -->
-  <section id="view-summary" class="view">
+  <!-- ====== VIEW: REVIEW ====== -->
+  <section id="view-review" class="view">
     <div class="view-header">
-      <h1>近期总结</h1>
-      <p class="view-desc">自动回顾近期任务与习惯数据，AI 帮你生成总结报告。</p>
+      <h1>回顾</h1>
     </div>
-    <div class="summary-controls">
-      <div class="summary-action-row">
-        <button id="btn-generate-summary" class="btn-primary">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 22l-.75-12.07A4.001 4.001 0 0 1 12 2z"/></svg>
-          AI 生成总结
-        </button>
-        <select id="summary-range" title="总结范围">
-          <option value="1">1 天</option>
-          <option value="3" selected>3 天</option>
-          <option value="7">7 天</option>
-          <option value="custom">自定义</option>
-        </select>
-        <input type="number" id="summary-range-custom" min="1" max="90" value="14" placeholder="1-90" style="display:none;width:60px">
-      </div>
-      <div id="summary-loading" class="ai-loading hidden">
-        <div class="loading-spinner"></div>
-        <span>AI 正在生成总结报告...</span>
-      </div>
-    </div>
-    <div id="summary-result" class="summary-result" style="display:none">
-      <div class="summary-result-header">
-        <h3>总结报告</h3>
-        <button id="btn-download-summary" class="btn-secondary" style="font-size:.82rem;padding:.35rem .8rem">下载报告</button>
-      </div>
-      <div id="summary-content" class="summary-content"></div>
-    </div>
-  </section>
 
-  <!-- VIEW: HABITS (长期习惯) -->
-  <section id="view-habits" class="view">
-    <div class="view-header">
-      <h1>长期习惯</h1>
-      <p class="view-desc">可反复完成的长期循环任务，记录每次时长或次数，持续积累水滴。</p>
-    </div>
-    <div class="habits-actions">
-      <button id="btn-add-habit" class="btn-primary">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        添加习惯
-      </button>
-    </div>
-    <div class="habits-list" id="habits-list">
-      <!-- Rendered by JS -->
-    </div>
-    <div class="habits-log-section" id="habits-log-section" style="display:none">
-      <h3>完成记录</h3>
-      <div id="habits-log" class="habits-log"></div>
-    </div>
-  </section>
+    <!-- Stats overview -->
+    <div class="review-stats" id="review-stats"></div>
 
-  <!-- HABIT ADD/EDIT MODAL -->
-  <div id="habit-modal-overlay" class="modal-overlay hidden">
-    <div class="modal" style="max-width:400px">
-      <div class="modal-header">
-        <h2 id="habit-modal-title">添加习惯</h2>
-        <button class="modal-close" id="habit-modal-close">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-row">
-          <label>习惯名称</label>
-          <input type="text" id="habit-edit-name" placeholder="如：阅读、运动、冥想">
-        </div>
-        <div class="form-row">
-          <label>记录方式</label>
-          <select id="habit-edit-type">
-            <option value="duration">记录时长 (小时)</option>
-            <option value="count">记录次数</option>
+    <!-- Week view (simplified Gantt) -->
+    <div class="review-section">
+      <h2>本周任务分布</h2>
+      <div class="week-grid" id="review-week-grid"></div>
+    </div>
+
+    <!-- AI Summary -->
+    <div class="review-section">
+      <div class="section-header">
+        <h2>AI 总结</h2>
+        <div class="summary-controls-inline">
+          <select id="summary-range" title="总结范围">
+            <option value="1">1 天</option>
+            <option value="3" selected>3 天</option>
+            <option value="7">7 天</option>
+            <option value="custom">自定义</option>
           </select>
-        </div>
-        <div class="form-row">
-          <label>图标 (emoji)</label>
-          <input type="text" id="habit-edit-icon" placeholder="📖" maxlength="10" style="width:60px;text-align:center">
-          <button id="btn-habit-regen-emoji" class="btn-secondary" style="margin-left:8px;font-size:.78rem;padding:4px 10px">重新生成</button>
-        </div>
-        <div class="form-row">
-          <label>获得水滴数</label>
-          <input type="number" id="habit-edit-drops" min="1" value="2" placeholder="如完成一次/一小时获得多少水滴">
-        </div>
-        <div class="form-row">
-          <label>水滴说明</label>
-          <p style="font-size:.78rem;color:var(--text-muted);margin-top:.2rem">时长类：每完成1小时获得对应水滴<br>次数类：每完成1次获得对应水滴</p>
-        </div>
-        <div class="form-row">
-          <label>标签</label>
-          <div class="tag-chip-selector" id="habit-tag-selector">
-            <!-- JS renders tag chips -->
-          </div>
+          <input type="number" id="summary-range-custom" min="1" max="90" value="14" placeholder="1-90" style="display:none;width:60px">
         </div>
       </div>
-      <div class="modal-footer">
-        <button id="btn-habit-delete" class="btn-danger" style="display:none">删除</button>
-        <button id="btn-habit-save" class="btn-primary">保存</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- HABIT LOG MODAL (record completion) -->
-  <div id="habit-log-overlay" class="modal-overlay hidden">
-    <div class="modal" style="max-width:360px">
-      <div class="modal-header">
-        <h2 id="habit-log-title">记录完成</h2>
-        <button class="modal-close" id="habit-log-close">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-row">
-          <label id="habit-log-label">完成时长 (小时)</label>
-          <input type="number" id="habit-log-value" min="0.1" step="0.1" value="1">
+      <button id="btn-generate-summary" class="btn-primary btn-sm" style="margin-bottom:1rem">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 22l-.75-12.07A4.001 4.001 0 0 1 12 2z"/></svg>
+        生成总结
+      </button>
+      <div id="summary-loading" class="ai-loading hidden"><div class="loading-spinner"></div><span>生成中...</span></div>
+      <div id="summary-result" class="summary-result" style="display:none">
+        <div class="summary-result-header">
+          <h3>总结报告</h3>
+          <button id="btn-download-summary" class="btn-secondary btn-xs">下载</button>
         </div>
-        <p id="habit-log-drops-preview" style="font-size:.85rem;color:var(--cyan);margin-top:.5rem"></p>
+        <div id="summary-content" class="summary-content"></div>
       </div>
-      <div class="modal-footer" style="justify-content:flex-end">
-        <button id="btn-habit-log-save" class="btn-primary">确认完成</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- VIEW: SHOP -->
-  <section id="view-shop" class="view">
-    <div class="view-header">
-      <h1>消费商城</h1>
-      <p class="view-desc">用专注水滴兑换奖励，犒劳努力的自己。</p>
-      <div class="shop-balance">💧 当前水滴：<strong id="shop-drops-num">0</strong></div>
-    </div>
-    <div class="shop-grid" id="shop-grid">
-      <!-- Rendered by JS -->
-    </div>
-    <div class="shop-custom-section">
-      <h3>自定义商品</h3>
-      <div class="shop-custom-form">
-        <input type="text" id="shop-new-name" placeholder="商品名称">
-        <input type="number" id="shop-new-price" placeholder="价格(水滴)" min="1">
-        <input type="text" id="shop-new-icon" placeholder="图标(emoji)" maxlength="10" style="width:60px;text-align:center">
-        <button id="btn-shop-add" class="btn-secondary">添加商品</button>
-      </div>
-    </div>
-    <div class="shop-section">
-      <h3>购买记录</h3>
-      <div id="shop-history" class="shop-history"></div>
     </div>
   </section>
 
-  <!-- SHOP EDIT MODAL -->
-  <div id="shop-edit-overlay" class="modal-overlay hidden">
-    <div class="modal" style="max-width:400px">
-      <div class="modal-header">
-        <h2 id="shop-edit-title">编辑商品</h2>
-        <button class="modal-close" id="shop-edit-close">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-row">
-          <label>商品名称</label>
-          <input type="text" id="shop-edit-name" placeholder="商品名称">
-        </div>
-        <div class="form-row">
-          <label>价格 (水滴)</label>
-          <input type="number" id="shop-edit-price" min="1" placeholder="价格">
-        </div>
-        <div class="form-row">
-          <label>图标 (emoji)</label>
-          <input type="text" id="shop-edit-icon" placeholder="🎁" maxlength="10" style="width:60px;text-align:center">
-          <button id="btn-shop-edit-regen-emoji" class="btn-secondary" style="margin-left:8px;font-size:.78rem;padding:4px 10px">重新生成</button>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button id="btn-shop-edit-delete" class="btn-danger">删除</button>
-        <button id="btn-shop-edit-save" class="btn-primary">保存</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- VIEW: SETTINGS -->
+  <!-- ====== VIEW: SETTINGS ====== -->
   <section id="view-settings" class="view">
     <div class="view-header">
       <h1>设置</h1>
-      <p class="view-desc">配置你的 AI 助手和偏好。</p>
     </div>
     <div class="settings-form">
-      <!-- User Info -->
       <div class="setting-group">
         <h3>个人信息</h3>
         <div class="setting-row">
@@ -458,7 +228,6 @@
           <input type="text" id="setting-user-name" placeholder="输入你的名字">
         </div>
       </div>
-
       <div class="setting-group">
         <h3>AI 配置</h3>
         <div class="setting-row">
@@ -487,64 +256,60 @@
           <label for="llm-model">模型名称</label>
           <input type="text" id="llm-model" placeholder="gpt-4o">
         </div>
-        <button id="btn-test-ai" class="btn-secondary">测试连接</button>
+        <button id="btn-test-ai" class="btn-secondary btn-sm">测试连接</button>
         <div id="ai-test-result" class="test-result"></div>
       </div>
-      <!-- Tags -->
       <div class="setting-group">
         <h3>标签管理</h3>
         <div id="tag-manager-list"></div>
-        <div class="setting-row" style="display:flex;gap:.4rem;margin-top:.5rem;align-items:flex-end">
-          <div style="flex:1">
-            <label for="tag-new-name">标签名称</label>
-            <input type="text" id="tag-new-name" placeholder="新标签名">
-          </div>
-          <div style="width:60px">
-            <label for="tag-new-color">颜色</label>
-            <input type="color" id="tag-new-color" value="#6366f1" style="width:100%;height:36px;padding:2px;cursor:pointer">
-          </div>
-          <button id="btn-add-tag" class="btn-secondary" style="white-space:nowrap;margin-bottom:0">添加</button>
+        <div class="setting-row" style="display:flex;gap:.5rem;margin-top:.5rem;align-items:flex-end">
+          <div style="flex:1"><label for="tag-new-name">标签名称</label><input type="text" id="tag-new-name" placeholder="新标签名"></div>
+          <div style="width:50px"><label for="tag-new-color">颜色</label><input type="color" id="tag-new-color" value="#6366f1" class="sli-color-picker"></div>
+          <button id="btn-add-tag" class="btn-secondary btn-sm" style="white-space:nowrap">添加</button>
         </div>
       </div>
-
-      <!-- Quick Links -->
+      <!-- Shop (reward) settings -->
       <div class="setting-group">
-        <h3>常用链接</h3>
-        <div id="links-manager-list"></div>
-        <div class="setting-row" style="display:flex;gap:.4rem;margin-top:.5rem">
-          <input type="text" id="link-new-name" placeholder="名称" style="flex:1">
-          <input type="url" id="link-new-url" placeholder="https://..." style="flex:2">
-          <button id="btn-add-link" class="btn-secondary" style="white-space:nowrap">添加</button>
+        <h3>奖励商城</h3>
+        <div class="shop-balance-inline">💧 当前水滴：<strong id="shop-drops-num">0</strong></div>
+        <div id="shop-grid" class="shop-grid-compact"></div>
+        <div class="shop-add-form">
+          <input type="text" id="shop-new-name" placeholder="商品名称">
+          <input type="number" id="shop-new-price" placeholder="价格" min="1">
+          <input type="text" id="shop-new-icon" placeholder="🎁" maxlength="10" style="width:50px;text-align:center">
+          <button id="btn-shop-add" class="btn-secondary btn-sm">添加</button>
         </div>
+        <h4 style="margin-top:1rem;font-size:.85rem;color:var(--text-dim)">购买记录</h4>
+        <div id="shop-history" class="shop-history"></div>
       </div>
-
       <div class="setting-group">
         <h3>数据管理</h3>
-        <button id="btn-export" class="btn-secondary">导出数据 (JSON)</button>
-        <button id="btn-import" class="btn-secondary">导入数据</button>
-        <input type="file" id="import-file" accept=".json" style="display:none">
+        <div class="setting-actions">
+          <button id="btn-export" class="btn-secondary btn-sm">导出 JSON</button>
+          <button id="btn-import" class="btn-secondary btn-sm">导入数据</button>
+          <input type="file" id="import-file" accept=".json" style="display:none">
+          <button id="btn-clear-data" class="btn-danger btn-sm">清除所有</button>
+        </div>
         <!-- Import Mode Modal -->
         <div id="import-mode-overlay" class="modal-overlay hidden">
           <div class="modal" style="max-width:400px">
-            <div class="modal-header">
-              <h2>选择导入模式</h2>
-              <button class="modal-close" id="import-mode-close">&times;</button>
-            </div>
+            <div class="modal-header"><h2>选择导入模式</h2><button class="modal-close" id="import-mode-close">&times;</button></div>
             <div class="modal-body">
-              <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem">请选择数据导入方式：</p>
-              <div style="display:flex;flex-direction:column;gap:.6rem">
-                <button id="import-mode-overwrite" class="btn-danger" style="width:100%;text-align:center;justify-content:center">覆盖模式 — 替换当前所有数据</button>
-                <button id="import-mode-merge" class="btn-secondary" style="width:100%;text-align:center;justify-content:center">合并模式 — 与现有数据叠加合并</button>
+              <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:1rem">请选择数据导入方式：</p>
+              <div style="display:flex;flex-direction:column;gap:.5rem">
+                <button id="import-mode-overwrite" class="btn-danger btn-sm" style="width:100%;justify-content:center">覆盖 — 替换所有数据</button>
+                <button id="import-mode-merge" class="btn-secondary btn-sm" style="width:100%;justify-content:center">合并 — 与现有数据叠加</button>
               </div>
             </div>
           </div>
         </div>
-        <button id="btn-clear-data" class="btn-danger">清除所有数据</button>
       </div>
     </div>
   </section>
 
 </main>
+
+<!-- ============ MODALS ============ -->
 
 <!-- TASK EDIT MODAL -->
 <div id="modal-overlay" class="modal-overlay hidden">
@@ -554,118 +319,158 @@
       <button class="modal-close" id="modal-close">&times;</button>
     </div>
     <div class="modal-body">
-      <div class="form-row">
-        <label>任务名称</label>
-        <input type="text" id="edit-task-name">
+      <div class="form-row"><label>任务名称</label><input type="text" id="edit-task-name"></div>
+      <div class="form-row"><label>标签</label><div id="edit-task-tags" class="tag-chip-selector"></div></div>
+      <div class="form-row form-row-half">
+        <div><label>优先级</label><select id="edit-task-quadrant">
+          <option value="urgent-important">重要紧急</option><option value="important">重要</option>
+          <option value="urgent">紧急</option><option value="neither">一般</option>
+        </select></div>
+        <div><label>循环</label><select id="edit-task-recurrence">
+          <option value="none">不重复</option><option value="daily">每天</option><option value="weekly">每周</option>
+        </select></div>
       </div>
-      <div class="form-row">
-        <label>标签</label>
-        <div id="edit-task-tags" class="tag-chip-selector"></div>
+      <div class="form-row form-row-half">
+        <div><label>日期</label><input type="date" id="edit-task-date"></div>
+        <div><label>时间</label><input type="time" id="edit-task-time"></div>
       </div>
+      <div class="form-row"><label>预估 (分钟)</label><input type="number" id="edit-task-duration" min="5" step="5" value="30"></div>
       <div class="form-row">
-        <label>优先级</label>
-        <select id="edit-task-quadrant">
-          <option value="urgent-important">重要紧急</option>
-          <option value="important">重要</option>
-          <option value="urgent">紧急</option>
-          <option value="neither">一般</option>
-        </select>
-      </div>
-      <div class="form-row">
-        <label>循环规则</label>
-        <select id="edit-task-recurrence">
-          <option value="none">不重复</option>
-          <option value="daily">每天循环</option>
-          <option value="weekly">每周循环</option>
-        </select>
-      </div>
-      <div class="form-row">
-        <label>日期</label>
-        <input type="date" id="edit-task-date">
-      </div>
-      <div class="form-row">
-        <label>时间（选填）</label>
-        <input type="time" id="edit-task-time" placeholder="如 09:00">
-      </div>
-      <div class="form-row">
-        <label>预估时间 (分钟)</label>
-        <input type="number" id="edit-task-duration" min="5" step="5" value="30">
-      </div>
-      <div class="form-row">
-        <label>子任务 (拆分)</label>
+        <label>子任务</label>
         <div id="edit-subtasks-container">
           <div id="edit-subtasks-list"></div>
-          <div class="add-subtask-row">
-            <input type="text" id="edit-new-subtask" placeholder="添加新子任务(按回车)">
-            <button id="btn-add-subtask" class="btn-secondary" style="margin-left: 5px; padding: 0.4rem 0.8rem;">添加</button>
-          </div>
+          <div class="add-subtask-row"><input type="text" id="edit-new-subtask" placeholder="添加子任务 (回车)"><button id="btn-add-subtask" class="btn-secondary btn-xs">添加</button></div>
         </div>
       </div>
-      <div class="form-row">
-        <label>备注</label>
-        <textarea id="edit-task-note" rows="3"></textarea>
+      <div class="form-row"><label>备注</label><textarea id="edit-task-note" rows="2"></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-modal-delete" class="btn-danger btn-sm">删除</button>
+      <button id="btn-modal-save" class="btn-primary btn-sm">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- HABIT EDIT MODAL -->
+<div id="habit-modal-overlay" class="modal-overlay hidden">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header"><h2 id="habit-modal-title">添加习惯</h2><button class="modal-close" id="habit-modal-close">&times;</button></div>
+    <div class="modal-body">
+      <div class="form-row"><label>习惯名称</label><input type="text" id="habit-edit-name" placeholder="如：阅读、运动"></div>
+      <div class="form-row form-row-half">
+        <div><label>记录方式</label><select id="habit-edit-type"><option value="duration">时长 (h)</option><option value="count">次数</option></select></div>
+        <div><label>每次水滴</label><input type="number" id="habit-edit-drops" min="1" value="2"></div>
+      </div>
+      <div class="form-row"><label>图标</label><input type="text" id="habit-edit-icon" placeholder="📖" maxlength="10" style="width:60px;text-align:center"></div>
+      <div class="form-row"><label>标签</label><div class="tag-chip-selector" id="habit-tag-selector"></div></div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-habit-delete" class="btn-danger btn-sm" style="display:none">删除</button>
+      <button id="btn-habit-save" class="btn-primary btn-sm">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- HABIT LOG MODAL -->
+<div id="habit-log-overlay" class="modal-overlay hidden">
+  <div class="modal" style="max-width:340px">
+    <div class="modal-header"><h2 id="habit-log-title">打卡</h2><button class="modal-close" id="habit-log-close">&times;</button></div>
+    <div class="modal-body">
+      <div class="form-row"><label id="habit-log-label">完成时长 (h)</label><input type="number" id="habit-log-value" min="0.1" step="0.1" value="1"></div>
+      <p id="habit-log-drops-preview" class="drops-preview"></p>
+    </div>
+    <div class="modal-footer" style="justify-content:flex-end"><button id="btn-habit-log-save" class="btn-primary btn-sm">确认</button></div>
+  </div>
+</div>
+
+<!-- TIME BLOCK ADD/EDIT MODAL -->
+<div id="tb-modal-overlay" class="modal-overlay hidden">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header"><h2 id="tb-modal-title">添加时间块</h2><button class="modal-close" id="tb-modal-close">&times;</button></div>
+    <div class="modal-body">
+      <div class="form-row"><label>关联</label><div class="tb-bind-chips" id="tb-bind-chips"></div></div>
+      <div class="form-row" id="tb-bind-target-row" style="display:none"><label id="tb-bind-target-label">选择目标</label><div class="tb-bind-target-list" id="tb-bind-target-list"></div></div>
+      <div class="form-row" id="tb-cat-row"><label>分类</label><div class="tb-cat-chips" id="tb-cat-chips"></div></div>
+      <div class="form-row" id="tb-name-row"><label>名称</label><input type="text" id="tb-edit-name" placeholder="如：阅读、开会"></div>
+      <div class="form-row tb-time-row">
+        <div class="tb-time-field"><label>开始</label><input type="time" id="tb-edit-start" value="09:00"></div>
+        <div class="tb-time-field"><label>结束</label><input type="time" id="tb-edit-end" value="10:00"></div>
       </div>
     </div>
     <div class="modal-footer">
-      <button id="btn-modal-delete" class="btn-danger">删除</button>
-      <button id="btn-modal-save" class="btn-primary">保存</button>
+      <button id="tb-modal-delete" class="btn-danger btn-sm" style="display:none">删除</button>
+      <button id="tb-modal-save" class="btn-primary btn-sm">保存</button>
     </div>
   </div>
 </div>
 
 <!-- DROPS RULES MODAL -->
 <div id="drops-rules-overlay" class="modal-overlay hidden">
-  <div class="modal" style="max-width:480px">
-    <div class="modal-header">
-      <h2>💧 专注水滴规则</h2>
-      <button class="modal-close" id="drops-rules-close">&times;</button>
-    </div>
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header"><h2>💧 水滴规则</h2><button class="modal-close" id="drops-rules-close">&times;</button></div>
     <div class="modal-body drops-rules-body">
       <div class="drops-rule-section">
         <h4>什么是水滴？</h4>
-        <p>水滴是你行动力的量化印记。每完成一个任务，你都会获得水滴奖励。积少成多，见证自己的成长。</p>
+        <p>每完成任务/习惯，获得水滴。积少成多，兑换奖励。</p>
       </div>
       <div class="drops-rule-section">
-        <h4>完成任务获得水滴</h4>
-        <p>公式：<code>floor(预估时间 / 60 × 优先级权重)</code></p>
+        <h4>计算公式</h4>
+        <p><code>floor(时间 / 60 × 权重)</code></p>
         <div class="drops-weight-table">
           <div class="drops-weight-row"><span class="dw-label" style="color:var(--q1)">重要紧急</span><span class="dw-val">×4</span></div>
           <div class="drops-weight-row"><span class="dw-label" style="color:var(--q2)">重要</span><span class="dw-val">×3</span></div>
           <div class="drops-weight-row"><span class="dw-label" style="color:var(--q3)">紧急</span><span class="dw-val">×2</span></div>
           <div class="drops-weight-row"><span class="dw-label" style="color:var(--q4)">一般</span><span class="dw-val">×1</span></div>
         </div>
-        <p class="drops-example">例：完成一个 30 分钟的「重要紧急」任务 = floor(30/60 × 4) = <strong>2 滴</strong></p>
-      </div>
-      <div class="drops-rule-section">
-        <h4>里程碑庆祝</h4>
-        <p>每累积 <strong>100 滴</strong> 水滴，会触发一次水滴庆祝动画，是你坚持行动的见证。</p>
       </div>
       <div class="drops-rule-section drops-current">
         <h4>当前水滴</h4>
         <div class="drops-current-num" id="drops-rules-total">0</div>
       </div>
       <div class="drops-rule-section">
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <h4>水滴历史明细</h4>
-          <button class="btn-secondary" id="btn-toggle-drops-history" style="font-size:.75rem;padding:.25rem .6rem">展开记录</button>
-        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between"><h4>历史明细</h4><button class="btn-secondary btn-xs" id="btn-toggle-drops-history">展开</button></div>
         <div id="drops-history-list" class="drops-history-list" style="display:none"></div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- CELEBRATION OVERLAY -->
-<div id="celebrate-overlay" class="celebrate-overlay hidden">
-  <canvas id="confetti-canvas"></canvas>
-  <div class="celebrate-msg" id="celebrate-msg"></div>
+<!-- SHOP EDIT MODAL -->
+<div id="shop-edit-overlay" class="modal-overlay hidden">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-header"><h2>编辑商品</h2><button class="modal-close" id="shop-edit-close">&times;</button></div>
+    <div class="modal-body">
+      <div class="form-row"><label>名称</label><input type="text" id="shop-edit-name"></div>
+      <div class="form-row"><label>价格</label><input type="number" id="shop-edit-price" min="1"></div>
+      <div class="form-row"><label>图标</label><input type="text" id="shop-edit-icon" placeholder="🎁" maxlength="10" style="width:60px;text-align:center"></div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-shop-edit-delete" class="btn-danger btn-sm">删除</button>
+      <button id="btn-shop-edit-save" class="btn-primary btn-sm">保存</button>
+    </div>
+  </div>
 </div>
 
+<!-- TOAST -->
+<div id="toast-container"></div>
+
+<!-- MOBILE BOTTOM TAB BAR -->
+<nav id="bottom-tabs">
+  <button class="tab-item active" data-view="today">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    <span>今日</span>
+  </button>
+  <button class="tab-item" data-view="tasks">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+    <span>任务</span>
+  </button>
+  <button class="tab-item" data-view="review">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+    <span>回顾</span>
+  </button>
+</nav>
+
 <script src="/app.js"></script>
-<script>
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
-}
-</script>
+<script>if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});</script>
 </body>
 </html>
