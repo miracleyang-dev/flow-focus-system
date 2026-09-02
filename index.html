@@ -33,6 +33,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
       <span>任务</span>
     </li>
+    <li class="nav-item" data-view="projects">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2"/></svg>
+      <span>项目</span>
+    </li>
     <li class="nav-item" data-view="review">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
       <span>回顾</span>
@@ -162,11 +166,23 @@
       <button id="btn-quick-add" class="btn-primary btn-sm">添加</button>
     </div>
 
-    <!-- Tag filters -->
-    <div class="board-filters" id="board-filters"></div>
+    <div class="task-toolbar">
+      <input type="search" id="task-search" placeholder="搜索任务名称或备注">
+      <select id="task-project-filter" aria-label="按项目筛选"><option value="all">全部项目</option><option value="none">未归档项目</option></select>
+      <button id="btn-show-trash" class="btn-secondary btn-sm">回收站</button>
+    </div>
 
     <!-- Task board -->
     <div class="board-list" id="board-list"></div>
+  </section>
+
+  <!-- ====== VIEW: PROJECTS ====== -->
+  <section id="view-projects" class="view">
+    <div class="view-header project-header">
+      <div><h1>项目</h1><p class="view-subtitle">把多个任务放进一个清晰的目标里</p></div>
+      <button id="btn-add-project" class="btn-primary btn-sm">新建项目</button>
+    </div>
+    <div id="project-list" class="project-list"></div>
   </section>
 
   <!-- ====== VIEW: REVIEW ====== -->
@@ -231,7 +247,7 @@
         <div class="setting-row">
           <label for="llm-provider">模型服务商</label>
           <select id="llm-provider">
-            <option value="openai">OpenAI (GPT)</option>
+            <option value="openai">OpenAI (GPT / Codex)</option>
             <option value="deepseek">DeepSeek</option>
             <option value="qwen">通义千问 (Qwen)</option>
             <option value="custom">自定义</option>
@@ -252,19 +268,11 @@
         </div>
         <div class="setting-row">
           <label for="llm-model">模型名称</label>
-          <input type="text" id="llm-model" placeholder="gpt-4o">
+          <input type="text" id="llm-model" list="llm-model-options" placeholder="gpt-4o">
+          <datalist id="llm-model-options"><option value="gpt-5-codex"></option><option value="gpt-4o"></option></datalist>
         </div>
         <button id="btn-test-ai" class="btn-secondary btn-sm">测试连接</button>
         <div id="ai-test-result" class="test-result"></div>
-      </div>
-      <div class="setting-group">
-        <h3>标签管理</h3>
-        <div id="tag-manager-list"></div>
-        <div class="setting-row" style="display:flex;gap:.5rem;margin-top:.5rem;align-items:flex-end">
-          <div style="flex:1"><label for="tag-new-name">标签名称</label><input type="text" id="tag-new-name" placeholder="新标签名"></div>
-          <div style="width:50px"><label for="tag-new-color">颜色</label><input type="color" id="tag-new-color" value="#6366f1" class="sli-color-picker"></div>
-          <button id="btn-add-tag" class="btn-secondary btn-sm" style="white-space:nowrap">添加</button>
-        </div>
       </div>
       <div class="setting-group">
         <h3>数据管理</h3>
@@ -274,6 +282,8 @@
           <input type="file" id="import-file" accept=".json" style="display:none">
           <button id="btn-clear-data" class="btn-danger btn-sm">清除所有</button>
         </div>
+        <div id="backup-reminder" class="backup-reminder"></div>
+        <button id="btn-show-shortcuts" class="btn-secondary btn-sm">查看快捷键</button>
         <!-- Import Mode Modal -->
         <div id="import-mode-overlay" class="modal-overlay hidden">
           <div class="modal" style="max-width:400px">
@@ -304,7 +314,8 @@
     </div>
     <div class="modal-body">
       <div class="form-row"><label>任务名称</label><input type="text" id="edit-task-name"></div>
-      <div class="form-row"><label>标签</label><div id="edit-task-tags" class="tag-chip-selector"></div></div>
+      <div class="form-row"><label for="edit-task-project">所属项目</label><select id="edit-task-project"><option value="">不归档项目</option></select></div>
+      <div class="form-row"><label><input type="checkbox" id="edit-task-pinned"> 置顶任务</label></div>
       <div class="form-row form-row-half">
         <div><label>优先级</label><select id="edit-task-quadrant">
           <option value="urgent-important">重要紧急</option><option value="important">重要</option>
@@ -345,7 +356,6 @@
         <div><label>记录方式</label><select id="habit-edit-type"><option value="duration">时长 (h)</option><option value="count">次数</option></select></div>
       </div>
       <div class="form-row"><label>图标</label><input type="text" id="habit-edit-icon" placeholder="📖" maxlength="10" style="width:60px;text-align:center"></div>
-      <div class="form-row"><label>标签</label><div class="tag-chip-selector" id="habit-tag-selector"></div></div>
     </div>
     <div class="modal-footer">
       <button id="btn-habit-delete" class="btn-danger btn-sm" style="display:none">删除</button>
@@ -389,6 +399,37 @@
 <!-- TOAST -->
 <div id="toast-container"></div>
 
+<!-- PROJECT MODAL -->
+<div id="project-modal-overlay" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header"><h2 id="project-modal-title">新建项目</h2><button class="modal-close" id="project-modal-close">&times;</button></div>
+    <div class="modal-body">
+      <div class="form-row"><label for="project-edit-name">项目名称</label><input type="text" id="project-edit-name" placeholder="例如：网站上线"></div>
+      <div class="form-row"><label for="project-edit-note">备注</label><textarea id="project-edit-note" rows="3" placeholder="项目目标、背景或补充说明"></textarea></div>
+      <div class="form-row"><label for="project-edit-status">状态</label><select id="project-edit-status"><option value="active">进行中</option><option value="planned">未开始</option><option value="paused">已暂停</option><option value="done">已完成</option></select></div>
+    </div>
+    <div class="modal-footer"><button id="project-modal-delete" class="btn-danger btn-sm" style="display:none">删除</button><button id="project-modal-save" class="btn-primary btn-sm">保存</button></div>
+  </div>
+</div>
+
+<!-- TRASH MODAL -->
+<div id="trash-modal-overlay" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header"><h2>回收站</h2><button class="modal-close" id="trash-modal-close">&times;</button></div>
+    <div class="modal-body"><div id="trash-list" class="trash-list"></div></div>
+  </div>
+</div>
+
+<!-- SHORTCUTS MODAL -->
+<div id="shortcut-modal-overlay" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header"><h2>快捷键</h2><button class="modal-close" id="shortcut-modal-close">&times;</button></div>
+    <div class="modal-body shortcut-list">
+      <div><kbd>N</kbd><span>新建任务</span></div><div><kbd>/</kbd><span>搜索任务</span></div><div><kbd>G</kbd><span>打开项目</span></div><div><kbd>Esc</kbd><span>关闭弹窗</span></div><div><kbd>?</kbd><span>显示快捷键</span></div>
+    </div>
+  </div>
+</div>
+
 <!-- MOBILE BOTTOM TAB BAR -->
 <nav id="bottom-tabs">
   <button class="tab-item active" data-view="today">
@@ -398,6 +439,10 @@
   <button class="tab-item" data-view="tasks">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
     <span>任务</span>
+  </button>
+  <button class="tab-item" data-view="projects">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2"/></svg>
+    <span>项目</span>
   </button>
   <button class="tab-item" data-view="review">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>

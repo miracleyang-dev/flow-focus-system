@@ -1,5 +1,5 @@
 // ===== 心流 · 个人效率系统 (重构版) =====
-// 3+1 视图：今日 / 任务 / 回顾 / 设置
+// 4+1 视图：今日 / 任务 / 项目 / 回顾 / 设置
 
 (function () {
   'use strict';
@@ -14,9 +14,9 @@
 
   function defaultState() {
     return {
-      tasks: [], schedule: {},
+      tasks: [], projects: [], trash: [], schedule: {},
       settings: { provider: 'deepseek', baseUrl: '', apiKey: '', model: 'deepseek-chat' },
-      tags: [], links: [], quotes: [], userInfo: { name: '' },
+      links: [], quotes: [], userInfo: { name: '' },
       timeBlocks: [], habits: [], habitLogs: [], taskLogs: [],
       wakeSleep: {},
       lastDailyCheck: '', lastModified: 0,
@@ -26,7 +26,7 @@
   function mergeState(raw) {
     const def = defaultState();
     const merged = { ...def, ...raw, settings: { ...def.settings, ...(raw.settings || {}) } };
-    ['tags','links','quotes','timeBlocks','habits','habitLogs','taskLogs'].forEach(k => {
+    ['projects','trash','links','quotes','timeBlocks','habits','habitLogs','taskLogs'].forEach(k => {
       if (!Array.isArray(merged[k])) merged[k] = def[k] || [];
     });
     if (!merged.userInfo) merged.userInfo = def.userInfo;
@@ -40,12 +40,14 @@
   }
 
   function migrateTasks(s) {
-    const MAP = { vocation: 'tag-vocation', being: 'tag-being', romance: 'tag-romance' };
     (s.tasks || []).forEach(t => {
-      if (t.category && !t.tags) { t.tags = MAP[t.category] ? [MAP[t.category]] : []; }
+      t.projectId = t.projectId || '';
+      t.pinned = Boolean(t.pinned);
+      delete t.tags;
       if (t.category) delete t.category;
-      if (!Array.isArray(t.tags)) t.tags = [];
     });
+    s.projects = (s.projects || []).map(p => ({ id: p.id || genId(), name: p.name || '未命名项目', note: p.note || '', status: p.status || 'active', createdAt: p.createdAt || new Date().toISOString() }));
+    s.trash = (s.trash || []).filter(t => t && t.id).map(t => ({ ...t, deletedAt: t.deletedAt || new Date().toISOString() }));
   }
 
   function loadStateSync() {
@@ -61,6 +63,7 @@
   function setSyncStatus(status) {
     const dot = document.querySelector('.sync-dot');
     if (dot) dot.className = 'sync-dot sync-' + status;
+    renderBackupReminder();
   }
 
   function saveState() {
@@ -99,7 +102,7 @@
         const localTime = state.lastModified || 0;
         const remoteTime = data.lastModified || 0;
         const localHasData = (state.tasks || []).length > 0
-          || (state.tags || []).length > 0
+          || (state.projects || []).length > 0
           || (state.habits || []).length > 0
           || (state.timeBlocks || []).length > 0
           || (state.userInfo && state.userInfo.name);
@@ -146,8 +149,7 @@
   function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
   function todayKey() { return localDateKey(new Date()); }
   function localDateKey(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
-  function getTag(id) { return (state.tags||[]).find(t => t.id === id); }
-  function renderTagChips(tagIds) { return (tagIds||[]).map(id => { const t = getTag(id); return t ? `<span class="task-tag-chip" style="background:${t.color}22;color:${t.color}">${esc(t.name)}</span>` : ''; }).join(''); }
+  function getProject(id) { return (state.projects || []).find(project => project.id === id); }
   function timeToMinutes(t) { const [h,m] = t.split(':').map(Number); return h*60+(m||0); }
   function formatDuration(mins) { const h = Math.floor(mins/60), m = mins%60; return (h>0?h+'h':'')+(m>0?m+'m':'')||'0m'; }
   function setupModalClose(ov, btn) {
@@ -165,14 +167,20 @@
     const maxOrder = state.tasks.reduce((m, x) => Math.max(m, x.sortOrder || 0), -1);
     const task = {
       id: genId(), name: t.name || '未命名任务', quadrant: t.quadrant || 'important',
-      tags: t.tags || [], date: t.date || todayKey(), time: t.time || '',
+      projectId: t.projectId || '', pinned: Boolean(t.pinned), date: t.date || todayKey(), time: t.time || '',
       duration: t.duration || 30, note: t.note || '', recurrence: t.recurrence || 'none',
       subtasks: t.subtasks || [], done: false, sortOrder: maxOrder + 1, createdAt: new Date().toISOString(),
     };
     state.tasks.push(task); saveState(); return task;
   }
   function updateTask(id, u) { const t = state.tasks.find(x => x.id === id); if (t) { Object.assign(t, u); saveState(); } }
-  function deleteTask(id) { state.tasks = state.tasks.filter(x => x.id !== id); saveState(); }
+  function deleteTask(id) {
+    const task = state.tasks.find(x => x.id === id);
+    if (!task) return;
+    state.tasks = state.tasks.filter(x => x.id !== id);
+    state.trash.push({ ...task, deletedAt: new Date().toISOString() });
+    saveState();
+  }
 
   const PRIORITY_LABELS = { 'urgent-important': '重要紧急', 'important': '重要', 'urgent': '紧急', 'neither': '一般' };
   const PRIORITY_COLORS = { 'urgent-important': 'var(--q1)', 'important': 'var(--q2)', 'urgent': 'var(--q3)', 'neither': 'var(--q4)' };
@@ -216,11 +224,11 @@
   const menuToggle = document.getElementById('menu-toggle');
   const mobileTitle = document.getElementById('mobile-title');
   const bottomTabs = document.querySelectorAll('.tab-item[data-view]');
-  const viewTitles = { today:'今日', tasks:'任务', review:'回顾', settings:'设置' };
+  const viewTitles = { today:'今日', tasks:'任务', projects:'项目', review:'回顾', settings:'设置' };
 
   const VIEW_RENDERERS = {
-    today: renderToday, tasks: renderTasks, review: renderReview,
-    settings: () => { loadSettingsUI(); renderSettingsLists(); },
+    today: renderToday, tasks: renderTasks, projects: renderProjects, review: renderReview,
+    settings: () => { loadSettingsUI(); renderSettingsLists(); renderBackupReminder(); },
   };
 
   function getActiveViewName() {
@@ -277,7 +285,7 @@
 
   // ===== RENDER: TASKS VIEW =====
   /* placeholder - filled next */
-  function renderTasks() { renderBoardFilters(); renderBoard(); }
+  function renderTasks() { renderProjectFilter(); renderBoard(); }
 
   // ===== RENDER: REVIEW VIEW =====
   /* placeholder - filled next */
@@ -335,7 +343,7 @@
       const el = document.createElement('div');
       const dlS = t.done ? null : deadlineStatus(t.date);
       el.className = 'today-task-item' + (t.done ? ' done' : '');
-      el.innerHTML = `<div class="tti-checkbox ${t.done?'checked':''}" data-id="${t.id}"></div><div class="tti-prio" style="background:${PRIORITY_COLORS[t.quadrant]||'var(--q4)'}"></div><div class="tti-name">${esc(t.name)}</div><div class="tti-tags">${renderTagChips(t.tags)}</div>${t.time?'<span class="tti-time">'+t.time+'</span>':''}${dlS==='overdue'?'<span class="tti-deadline overdue">逾期</span>':''}`;
+      el.innerHTML = `<div class="tti-checkbox ${t.done?'checked':''}" data-id="${t.id}"></div><div class="tti-prio" style="background:${PRIORITY_COLORS[t.quadrant]||'var(--q4)'}"></div><div class="tti-name">${t.pinned?'★ ':''}${esc(t.name)}</div>${t.time?'<span class="tti-time">'+t.time+'</span>':''}${dlS==='overdue'?'<span class="tti-deadline overdue">逾期</span>':''}`;
       el.querySelector('.tti-checkbox').addEventListener('click', e => { e.stopPropagation(); toggleDone(t.id); });
       el.addEventListener('click', () => openEditModal(t.id));
       taskList.appendChild(el);
@@ -381,14 +389,6 @@
   const TB_BIND_TYPES = { none:{label:'不关联',icon:'⊘'}, task:{label:'任务',icon:'📋'}, habit:{label:'打卡',icon:'✅'} };
 
   function resolveBlockStyle(block) {
-    if (block.bindType === 'task' && block.bindId) {
-      const t = state.tasks.find(x => x.id === block.bindId);
-      if (t && t.tags && t.tags.length > 0) { const tag = getTag(t.tags[0]); if (tag) return { color: tag.color, tagLabel: tag.name }; }
-    }
-    if (block.bindType === 'habit' && block.bindId) {
-      const h = (state.habits||[]).find(x => x.id === block.bindId);
-      if (h && h.tags && h.tags.length > 0) { const tag = getTag(h.tags[0]); if (tag) return { color: tag.color, tagLabel: tag.name }; }
-    }
     const cat = TB_CATEGORIES[block.category] || TB_CATEGORIES.daily;
     return { color: cat.color, tagLabel: cat.label };
   }
@@ -400,23 +400,18 @@
   }
 
   // ===== TASK BOARD =====
-  let boardTagFilter = 'all';
-
-  function renderBoardFilters() {
-    const c = document.getElementById('board-filters'); c.innerHTML = '';
-    const allBtn = document.createElement('button');
-    allBtn.className = 'cat-filter'+(boardTagFilter==='all'?' active':'');
-    allBtn.textContent = '全部';
-    allBtn.addEventListener('click', () => { boardTagFilter='all'; renderBoardFilters(); renderBoard(); });
-    c.appendChild(allBtn);
-    (state.tags||[]).forEach(tag => {
-      const btn = document.createElement('button');
-      btn.className = 'cat-filter'+(boardTagFilter===tag.id?' active':'');
-      btn.innerHTML = `<span class="cat-dot" style="background:${tag.color}"></span>${esc(tag.name)}`;
-      btn.addEventListener('click', () => { boardTagFilter=tag.id; renderBoardFilters(); renderBoard(); });
-      c.appendChild(btn);
+  let projectFilter = 'all';
+  const taskSearch = document.getElementById('task-search');
+  const projectFilterSelect = document.getElementById('task-project-filter');
+  function renderProjectFilter() {
+    projectFilterSelect.innerHTML = '<option value="all">全部项目</option><option value="none">未归档项目</option>';
+    (state.projects || []).forEach(project => {
+      projectFilterSelect.insertAdjacentHTML('beforeend', `<option value="${project.id}">${esc(project.name)}</option>`);
     });
+    projectFilterSelect.value = projectFilter;
   }
+  taskSearch.addEventListener('input', renderBoard);
+  projectFilterSelect.addEventListener('change', () => { projectFilter = projectFilterSelect.value; renderBoard(); });
 
   // Drag state
   let dragSrcId = null;
@@ -459,9 +454,13 @@
 
   function renderBoard() {
     const list = document.getElementById('board-list');
-    let tasks = [...state.tasks];
-    if (boardTagFilter !== 'all') tasks = tasks.filter(t => (t.tags||[]).includes(boardTagFilter));
-    tasks.sort((a,b) => { if(a.done!==b.done) return a.done?1:-1; return (a.sortOrder??999)-(b.sortOrder??999); });
+    const query = taskSearch.value.trim().toLowerCase();
+    let tasks = [...state.tasks].filter(task => {
+      const matchesText = !query || (task.name + ' ' + (task.note || '')).toLowerCase().includes(query);
+      const matchesProject = projectFilter === 'all' || (projectFilter === 'none' ? !task.projectId : task.projectId === projectFilter);
+      return matchesText && matchesProject;
+    });
+    tasks.sort((a,b) => { if(a.done!==b.done) return a.done?1:-1; if(Boolean(a.pinned)!==Boolean(b.pinned)) return a.pinned?-1:1; return (a.sortOrder??999)-(b.sortOrder??999); });
     list.innerHTML = '';
     if (tasks.length === 0) { list.innerHTML = '<div style="color:var(--text-muted);padding:1.5rem;text-align:center;font-size:.85rem">暂无任务</div>'; return; }
     tasks.forEach(t => {
@@ -469,12 +468,12 @@
       const dlS = t.done ? null : deadlineStatus(t.date);
       card.className = 'task-card'+(t.done?' done':'')+(dlS==='overdue'?' card-overdue':dlS==='today'?' card-today':'');
       card.dataset.id = t.id; card.draggable = !t.done;
-      const tags = renderTagChips(t.tags), dateL = formatDateShort(t.date), timeL = t.time||'';
+      const project = getProject(t.projectId), dateL = formatDateShort(t.date), timeL = t.time||'';
       const recIcon = t.recurrence==='daily'?' 🔄':t.recurrence==='weekly'?' 🔁':'';
       const prioL = PRIORITY_LABELS[t.quadrant]||'一般', prioC = PRIORITY_COLORS[t.quadrant]||'var(--q4)';
       let subTag = '';
       if (t.subtasks&&t.subtasks.length>0) { const dc=t.subtasks.filter(s=>s.done).length; subTag=`<span class="task-meta-tag" style="color:var(--accent)">✓ ${dc}/${t.subtasks.length}</span>`; }
-      card.innerHTML = `<div class="task-card-top"><div class="drag-handle" title="拖拽排序">⁞</div><div class="task-checkbox ${t.done?'checked':''}" data-id="${t.id}"></div><div class="task-card-name">${esc(t.name)}${recIcon}</div>${deadlineTag(dlS)}<span class="task-prio-tag" style="background:${prioC}22;color:${prioC};border:1px solid ${prioC}44">${prioL}</span></div><div class="task-card-meta">${tags}${dateL?'<span class="task-date-tag">'+dateL+'</span>':''}${timeL?'<span class="task-date-tag">'+timeL+'</span>':''}<span class="task-meta-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>${t.duration}分</span>${subTag}</div>`;
+      card.innerHTML = `<div class="task-card-top"><div class="drag-handle" title="拖拽排序">⁞</div><div class="task-checkbox ${t.done?'checked':''}" data-id="${t.id}"></div><div class="task-card-name">${t.pinned?'★ ':''}${esc(t.name)}${recIcon}</div>${deadlineTag(dlS)}<span class="task-prio-tag" style="background:${prioC}22;color:${prioC};border:1px solid ${prioC}44">${prioL}</span></div><div class="task-card-meta">${project?'<span class="task-project-tag">'+esc(project.name)+'</span>':''}${dateL?'<span class="task-date-tag">'+dateL+'</span>':''}${timeL?'<span class="task-date-tag">'+timeL+'</span>':''}<span class="task-meta-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>${t.duration}分</span>${subTag}</div>`;
       card.addEventListener('dragstart', handleDragStart);
       card.addEventListener('dragover', handleDragOver);
       card.addEventListener('dragleave', handleDragLeave);
@@ -506,8 +505,7 @@
     const text = document.getElementById('dump-input').value.trim(); if (!text) return;
     const btn = document.getElementById('btn-analyze'); btn.disabled = true;
     document.getElementById('ai-loading').classList.remove('hidden');
-    const tagsList = (state.tags||[]).map(t => `"${t.id}" (${t.name})`).join(', ');
-    const sys = `你是任务分析助手。当前日期 ${todayKey()}。从用户文字中提取任务。可用标签ID: ${tagsList}。返回JSON数组：[{"name":"","quadrant":"important","tags":[],"date":"YYYY-MM-DD","time":"","duration":30,"note":"","recurrence":"none","subtasks":[{"name":"","done":false}]}]`;
+    const sys = `你是任务分析助手。当前日期 ${todayKey()}。从用户文字中提取任务。返回JSON数组：[ {"name":"","quadrant":"important","date":"YYYY-MM-DD","time":"","duration":30,"note":"","recurrence":"none","subtasks":[{"name":"","done":false}]} ]`;
     try {
       const raw = await callLLM(sys, text);
       const m = raw.match(/\[[\s\S]*\]/); if (!m) throw new Error('格式异常');
@@ -531,19 +529,13 @@
     editRecurrence=document.getElementById('edit-task-recurrence'), editDate=document.getElementById('edit-task-date'),
     editTime=document.getElementById('edit-task-time'), editDuration=document.getElementById('edit-task-duration'),
     editNote=document.getElementById('edit-task-note'), editSubtasksList=document.getElementById('edit-subtasks-list'),
-    editNewSubtask=document.getElementById('edit-new-subtask'), editTagsContainer=document.getElementById('edit-task-tags');
-  let editingTaskId=null, currentSubtasks=[], selectedTags=[];
+    editNewSubtask=document.getElementById('edit-new-subtask'), editProject=document.getElementById('edit-task-project'), editPinned=document.getElementById('edit-task-pinned');
+  let editingTaskId=null, currentSubtasks=[];
 
-  function renderEditTags() {
-    editTagsContainer.innerHTML = '';
-    (state.tags||[]).forEach(tag => {
-      const chip = document.createElement('span');
-      chip.className = 'tag-chip'+(selectedTags.includes(tag.id)?' selected':'');
-      chip.style.cssText = 'background:'+tag.color+'22;color:'+tag.color;
-      chip.textContent = tag.name;
-      chip.addEventListener('click', () => { const i=selectedTags.indexOf(tag.id); if(i>=0)selectedTags.splice(i,1);else selectedTags.push(tag.id); renderEditTags(); });
-      editTagsContainer.appendChild(chip);
-    });
+  function renderTaskProjects(selected) {
+    editProject.innerHTML = '<option value="">不归档项目</option>';
+    (state.projects || []).forEach(project => editProject.insertAdjacentHTML('beforeend', `<option value="${project.id}">${esc(project.name)}</option>`));
+    editProject.value = selected || '';
   }
   function renderSubtasks() {
     editSubtasksList.innerHTML = '';
@@ -563,7 +555,7 @@
     const t = state.tasks.find(x=>x.id===id); if(!t) return;
     editingTaskId=id; document.getElementById('modal-title').textContent='编辑任务';
     document.getElementById('btn-modal-delete').style.display='';
-    editName.value=t.name; selectedTags=[...(t.tags||[])]; renderEditTags();
+    editName.value=t.name; renderTaskProjects(t.projectId); editPinned.checked=Boolean(t.pinned);
     editQuadrant.value=t.quadrant; editRecurrence.value=t.recurrence||'none';
     editDate.value=t.date||todayKey(); editTime.value=t.time||'';
     editDuration.value=t.duration; editNote.value=t.note||'';
@@ -573,7 +565,7 @@
   function openAddModal() {
     editingTaskId=null; document.getElementById('modal-title').textContent='添加任务';
     document.getElementById('btn-modal-delete').style.display='none';
-    editName.value=''; selectedTags=[]; renderEditTags();
+    editName.value=''; renderTaskProjects(''); editPinned.checked=false;
     editQuadrant.value='important'; editRecurrence.value='none';
     editDate.value=todayKey(); editTime.value=''; editDuration.value=30; editNote.value='';
     currentSubtasks=[]; renderSubtasks();
@@ -581,7 +573,7 @@
   }
   setupModalClose(modalOverlay, document.getElementById('modal-close'));
   document.getElementById('btn-modal-save').addEventListener('click', () => {
-    const data = { name:editName.value.trim()||'未命名任务', tags:[...selectedTags], quadrant:editQuadrant.value, recurrence:editRecurrence.value, date:editDate.value||todayKey(), time:editTime.value||'', duration:parseInt(editDuration.value)||30, note:editNote.value.trim(), subtasks:currentSubtasks };
+    const data = { name:editName.value.trim()||'未命名任务', projectId:editProject.value, pinned:editPinned.checked, quadrant:editQuadrant.value, recurrence:editRecurrence.value, date:editDate.value||todayKey(), time:editTime.value||'', duration:parseInt(editDuration.value)||30, note:editNote.value.trim(), subtasks:currentSubtasks };
     if(editingTaskId) updateTask(editingTaskId, data); else addTask(data);
     modalOverlay.classList.add('hidden'); renderActiveView();
   });
@@ -601,9 +593,6 @@
     document.getElementById('habit-edit-name').value=h?h.name:'';
     document.getElementById('habit-edit-type').value=h?h.type:'duration';
     document.getElementById('habit-edit-icon').value=h?h.icon:'';
-    const sel=document.getElementById('habit-tag-selector'); sel.innerHTML='';
-    const sTags=h?(h.tags||[]):[];
-    (state.tags||[]).forEach(tag=>{const c=document.createElement('span');c.className='tag-chip'+(sTags.includes(tag.id)?' selected':'');c.style.cssText='background:'+tag.color+'22;color:'+tag.color;c.textContent=tag.name;c.dataset.tagId=tag.id;c.addEventListener('click',()=>c.classList.toggle('selected'));sel.appendChild(c);});
     habitModalOverlay.classList.remove('hidden');
   }
   setupModalClose(habitModalOverlay, document.getElementById('habit-modal-close'));
@@ -611,10 +600,9 @@
     const name=document.getElementById('habit-edit-name').value.trim(); if(!name){alert('请输入名称');return;}
     const type=document.getElementById('habit-edit-type').value;
     const icon=document.getElementById('habit-edit-icon').value.trim()||'🔄';
-    const tags=Array.from(document.querySelectorAll('#habit-tag-selector .tag-chip.selected')).map(el=>el.dataset.tagId);
     if(!state.habits) state.habits=[];
-    if(editingHabitId){const h=(state.habits).find(x=>x.id===editingHabitId);if(h){h.name=name;h.type=type;h.icon=icon;h.tags=tags;}}
-    else state.habits.push({id:'habit-'+genId(),name,type,icon,tags,createdAt:new Date().toISOString()});
+    if(editingHabitId){const h=(state.habits).find(x=>x.id===editingHabitId);if(h){h.name=name;h.type=type;h.icon=icon;}}
+    else state.habits.push({id:'habit-'+genId(),name,type,icon,createdAt:new Date().toISOString()});
     saveState(); habitModalOverlay.classList.add('hidden'); renderActiveView();
   });
   document.getElementById('btn-habit-delete').addEventListener('click', () => {
@@ -730,8 +718,7 @@
       whtml += '<div class="week-chips">';
       if(dayTasks.length===0) whtml += '<div style="flex:1"></div>';
       dayTasks.forEach(t=>{
-        const tag = (t.tags||[]).length>0?getTag(t.tags[0]):null;
-        const c = tag?tag.color:'#64748b';
+        const c = t.pinned ? 'var(--accent)' : '#64748b';
         const sn = t.name.length>4?t.name.slice(0,4)+'..':t.name;
         whtml += `<div class="week-chip${t.done?' done':''}" style="background:${c}" title="${esc(t.name)}">${esc(sn)}</div>`;
       });
@@ -822,21 +809,105 @@
     catch(e){r.textContent='✗ '+e.message;r.className='test-result error';}
   });
 
-  function renderSettingsLists(){ renderTagSettings(); }
-  function renderTagSettings(){
-    const c=document.getElementById('tag-manager-list');c.innerHTML='';
-    (state.tags||[]).forEach((tag,idx)=>{
-      const el=document.createElement('div');el.className='setting-list-item';
-      el.innerHTML=`<input type="color" class="sli-color-picker" value="${tag.color}" title="颜色"><span class="sli-label">${esc(tag.name)}</span><span class="sli-remove">&times;</span>`;
-      el.querySelector('.sli-color-picker').addEventListener('change',e=>{tag.color=e.target.value;saveState();renderActiveView();});
-      el.querySelector('.sli-remove').addEventListener('click',()=>{if(!confirm('删除标签 "'+tag.name+'"？'))return;const tid=tag.id;state.tags.splice(idx,1);state.tasks.forEach(t=>{if(t.tags)t.tags=t.tags.filter(id=>id!==tid);});saveState();renderTagSettings();});
-      c.appendChild(el);
+  function renderSettingsLists() {}
+
+  // ===== PROJECTS =====
+  let editingProjectId = null;
+  const projectModalOverlay = document.getElementById('project-modal-overlay');
+  const projectNameInput = document.getElementById('project-edit-name');
+  const projectNoteInput = document.getElementById('project-edit-note');
+  const projectStatusInput = document.getElementById('project-edit-status');
+  setupModalClose(projectModalOverlay, document.getElementById('project-modal-close'));
+
+  function openProjectModal(id) {
+    const project = id ? getProject(id) : null;
+    editingProjectId = id;
+    document.getElementById('project-modal-title').textContent = project ? '编辑项目' : '新建项目';
+    document.getElementById('project-modal-delete').style.display = project ? '' : 'none';
+    projectNameInput.value = project ? project.name : '';
+    projectNoteInput.value = project ? project.note : '';
+    projectStatusInput.value = project ? project.status : 'active';
+    projectModalOverlay.classList.remove('hidden');
+    projectNameInput.focus();
+  }
+
+  function renderProjects() {
+    const list = document.getElementById('project-list');
+    list.innerHTML = '';
+    if (!(state.projects || []).length) {
+      list.innerHTML = '<div class="empty-state">还没有项目，先建立一个清晰的目标吧。</div>';
+      return;
+    }
+    state.projects.forEach(project => {
+      const tasks = state.tasks.filter(task => task.projectId === project.id);
+      const done = tasks.filter(task => task.done).length;
+      const percent = tasks.length ? Math.round(done / tasks.length * 100) : 0;
+      const card = document.createElement('article');
+      card.className = 'project-card';
+      card.innerHTML = `<div class="project-card-head"><div><h2>${esc(project.name)}</h2><span class="project-status status-${project.status}">${({active:'进行中',planned:'未开始',paused:'已暂停',done:'已完成'})[project.status] || '进行中'}</span></div><button class="btn-icon project-edit" aria-label="编辑项目" title="编辑项目">✎</button></div><p class="project-note">${esc(project.note) || '暂无备注'}</p><div class="project-progress"><div class="project-progress-bar"><span style="width:${percent}%"></span></div><strong>${percent}%</strong></div><div class="project-meta">${done} / ${tasks.length} 个任务完成</div><button class="btn-secondary btn-sm project-open-tasks">查看项目任务</button>`;
+      card.querySelector('.project-edit').addEventListener('click', () => openProjectModal(project.id));
+      card.querySelector('.project-open-tasks').addEventListener('click', () => { projectFilter = project.id; switchView('tasks'); });
+      list.appendChild(card);
     });
   }
-  document.getElementById('btn-add-tag').addEventListener('click',()=>{
-    const ni=document.getElementById('tag-new-name'),ci=document.getElementById('tag-new-color');
-    const name=ni.value.trim();if(!name)return;
-    state.tags.push({id:'tag-'+genId(),name,color:ci.value});saveState();ni.value='';renderTagSettings();
+
+  document.getElementById('btn-add-project').addEventListener('click', () => openProjectModal(null));
+  document.getElementById('project-modal-save').addEventListener('click', () => {
+    const name = projectNameInput.value.trim();
+    if (!name) { alert('请输入项目名称'); return; }
+    if (editingProjectId) {
+      const project = getProject(editingProjectId);
+      Object.assign(project, { name, note: projectNoteInput.value.trim(), status: projectStatusInput.value });
+    } else {
+      state.projects.push({ id: 'project-' + genId(), name, note: projectNoteInput.value.trim(), status: projectStatusInput.value, createdAt: new Date().toISOString() });
+    }
+    saveState(); projectModalOverlay.classList.add('hidden'); renderProjects(); renderTaskProjects(); renderProjectFilter();
+  });
+  document.getElementById('project-modal-delete').addEventListener('click', () => {
+    if (!editingProjectId || !confirm('删除项目后，项目内任务会变为未归档。继续吗？')) return;
+    state.projects = state.projects.filter(project => project.id !== editingProjectId);
+    state.tasks.forEach(task => { if (task.projectId === editingProjectId) task.projectId = ''; });
+    saveState(); projectModalOverlay.classList.add('hidden'); renderProjects(); renderTaskProjects(); renderProjectFilter();
+  });
+
+  // ===== TRASH =====
+  const trashModalOverlay = document.getElementById('trash-modal-overlay');
+  setupModalClose(trashModalOverlay, document.getElementById('trash-modal-close'));
+  function renderTrash() {
+    const list = document.getElementById('trash-list');
+    list.innerHTML = '';
+    if (!state.trash.length) { list.innerHTML = '<div class="empty-state">回收站为空</div>'; return; }
+    state.trash.forEach(task => {
+      const item = document.createElement('div'); item.className = 'trash-item';
+      item.innerHTML = `<span>${esc(task.name)}</span><button class="btn-secondary btn-xs">恢复</button><button class="btn-danger btn-xs">永久删除</button>`;
+      item.querySelectorAll('button')[0].addEventListener('click', () => { state.tasks.push(task); state.trash = state.trash.filter(item => item.id !== task.id); saveState(); renderTrash(); renderBoard(); });
+      item.querySelectorAll('button')[1].addEventListener('click', () => { if (confirm('永久删除后不可恢复，继续吗？')) { state.trash = state.trash.filter(item => item.id !== task.id); saveState(); renderTrash(); } });
+      list.appendChild(item);
+    });
+  }
+  document.getElementById('btn-show-trash').addEventListener('click', () => { renderTrash(); trashModalOverlay.classList.remove('hidden'); });
+
+  // ===== BACKUP REMINDER & SHORTCUTS =====
+  function renderBackupReminder() {
+    const reminder = document.getElementById('backup-reminder');
+    if (!reminder) return;
+    const offline = document.querySelector('.sync-dot')?.classList.contains('sync-offline');
+    reminder.className = 'backup-reminder ' + (offline ? 'warning' : 'ready');
+    reminder.textContent = offline ? '云端暂未连接，数据只保存在本地缓存。' : '云端备份已启用，修改会自动保存。';
+  }
+  const shortcutOverlay = document.getElementById('shortcut-modal-overlay');
+  setupModalClose(shortcutOverlay, document.getElementById('shortcut-modal-close'));
+  document.getElementById('btn-show-shortcuts').addEventListener('click', () => shortcutOverlay.classList.remove('hidden'));
+  document.addEventListener('keydown', event => {
+    if (event.target.matches('input, textarea, select')) {
+      if (event.key === 'Escape') event.target.blur();
+      return;
+    }
+    if (event.key === 'Escape') document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(overlay => overlay.classList.add('hidden'));
+    if (event.key === '?') shortcutOverlay.classList.remove('hidden');
+    if (event.key.toLowerCase() === 'n') { switchView('tasks'); openAddModal(); }
+    if (event.key === '/') { event.preventDefault(); switchView('tasks'); taskSearch.focus(); }
+    if (event.key.toLowerCase() === 'g') switchView('projects');
   });
 
   // ===== DATA IMPORT/EXPORT =====
@@ -853,7 +924,7 @@
   document.getElementById('import-mode-merge').addEventListener('click',()=>{
     if(!pendingImportData)return;importModeOverlay.classList.add('hidden');const imp=mergeState(pendingImportData);pendingImportData=null;
     const eids=new Set((state.tasks||[]).map(t=>t.id));(imp.tasks||[]).forEach(t=>{if(!eids.has(t.id))state.tasks.push(t);});
-    const etids=new Set((state.tags||[]).map(t=>t.id));(imp.tags||[]).forEach(t=>{if(!etids.has(t.id))state.tags.push(t);});
+    const epids=new Set((state.projects||[]).map(project=>project.id));(imp.projects||[]).forEach(project=>{if(!epids.has(project.id))state.projects.push(project);});
     saveState();loadSettingsUI();renderActiveView();alert('合并成功！');
   });
   document.getElementById('btn-clear-data').addEventListener('click',()=>{
