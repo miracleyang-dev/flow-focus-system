@@ -1,81 +1,10 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const Redis = require('ioredis');
 
-// ===== Redis 连接（兼容 Railway 多种环境变量名） =====
-let redis = null;
-let redisReady = false;
-let redisError = '';
-
-function initRedis() {
-  // Railway 可能注入不同的变量名
-  const url = process.env.REDIS_URL
-    || process.env.REDIS_PRIVATE_URL
-    || process.env.REDIS_PUBLIC_URL;
-
-  if (!url) {
-    redisError = '未找到 REDIS_URL / REDIS_PRIVATE_URL / REDIS_PUBLIC_URL 环境变量';
-    console.error('❌ ' + redisError);
-    return;
-  }
-
-  console.log('🔄 正在连接 Redis...');
-  const Redis = require('ioredis');
-  redis = new Redis(url, {
-    maxRetriesPerRequest: 3,
-    retryStrategy(times) {
-      if (times > 5) return null; // 超过 5 次停止重试
-      return Math.min(times * 200, 2000);
-    },
-    connectTimeout: 10000,
-  });
-
-  redis.on('connect', () => {
-    redisReady = true;
-    redisError = '';
-    console.log('✅ Redis 连接成功');
-  });
-
-  redis.on('ready', () => {
-    redisReady = true;
-    redisError = '';
-  });
-
-  redis.on('error', (err) => {
-    redisReady = false;
-    redisError = err.message || '连接错误';
-    console.error('❌ Redis 错误:', err.message);
-  });
-
-  redis.on('close', () => {
-    redisReady = false;
-    console.log('⚠️ Redis 连接关闭');
-  });
-}
-
-initRedis();
-
-// ===== JSON 文件兜底存储 =====
-const DATA_FILE = path.join(__dirname, 'data.json');
-
-function readFileData() {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      return fs.readFileSync(DATA_FILE, 'utf-8');
-    }
-  } catch (e) { /* ignore */ }
-  return '{}';
-}
-
-function writeFileData(json) {
-  try {
-    fs.writeFileSync(DATA_FILE, json, 'utf-8');
-  } catch (e) {
-    console.error('⚠️ 文件写入失败:', e.message);
-  }
-}
-
-// ===== 静态文件 MIME 类型 =====
+const redisUrl = process.env.REDIS_URL || process.env.REDIS_PRIVATE_URL || process.env.REDIS_PUBLIC_URL;
+const redis = redisUrl ? new Redis(redisUrl, { maxRetriesPerRequest: 2, connectTimeout: 10000 }) : null;
 const mime = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -89,133 +18,71 @@ const mime = {
   '.webmanifest': 'application/manifest+json',
 };
 
-// ===== 创建服务器 =====
-const server = http.createServer(async (req, res) => {
-  const { method, url } = req;
+if (redis) {
+  redis.on('error', err => console.error('Redis 错误:', err.message));
+} else {
+  console.warn('未配置 Redis，云端数据暂不可用');
+}
 
-  // CORS headers (对调试有用)
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+function sendJson(res, status, data) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(data));
+}
 
-  // --------------------------
-  // 健康检查：前端可调用此接口判断后端和 Redis 状态
-  // --------------------------
-  if (url === '/api/health' && method === 'GET') {
-    const status = {
-      server: true,
-      redis: redisReady,
-      redisError: redisError || null,
-      env: {
-        REDIS_URL: !!process.env.REDIS_URL,
-        REDIS_PRIVATE_URL: !!process.env.REDIS_PRIVATE_URL,
-        REDIS_PUBLIC_URL: !!process.env.REDIS_PUBLIC_URL,
-      },
-      timestamp: new Date().toISOString(),
-    };
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(status));
+async function handleDataRequest(req, res) {
+  if (!redis) {
+    sendJson(res, 503, { error: '未配置 Railway Redis' });
     return;
   }
-
-  // --------------------------
-  // API：获取数据
-  // --------------------------
-  if (url === '/api/data' && method === 'GET') {
-    try {
-      let data = null;
-      if (redis && redisReady) {
-        data = await redis.get('app_data');
-      }
-      // Redis 无数据或不可用时，从文件读取
-      if (!data || data === '{}') {
-        data = readFileData();
-      }
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(data || '{}');
-    } catch (err) {
-      console.error('❌ GET /api/data 错误:', err.message);
-      // 降级到文件
-      const fallback = readFileData();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(fallback);
+  try {
+    if (req.method === 'GET') {
+      const data = await redis.get('app_data');
+      sendJson(res, 200, data ? JSON.parse(data) : {});
+      return;
     }
+
+    if (req.method === 'POST') {
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of req) {
+        size += chunk.length;
+        if (size > 5 * 1024 * 1024) {
+          sendJson(res, 413, { error: '数据超过 5MB 限制' });
+          return;
+        }
+        chunks.push(chunk);
+      }
+      const body = Buffer.concat(chunks).toString('utf8');
+      const data = JSON.parse(body);
+      await redis.set('app_data', JSON.stringify(data));
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    res.setHeader('Allow', 'GET, POST');
+    sendJson(res, 405, { error: 'Method Not Allowed' });
+  } catch (err) {
+    console.error('数据接口错误:', err.message);
+    sendJson(res, 500, { error: '云端数据操作失败' });
+  }
+}
+
+const server = http.createServer((req, res) => {
+  const requestPath = (req.url || '/').split('?')[0];
+  if (requestPath === '/api/data') {
+    handleDataRequest(req, res);
     return;
   }
 
-  // --------------------------
-  // API：保存数据
-  // --------------------------
-  if (url === '/api/data' && method === 'POST') {
-    let body = '';
-    let bodySize = 0;
-    let aborted = false;
-    const MAX_BODY = 5 * 1024 * 1024; // 5MB 限制
-
-    req.on('data', chunk => {
-      bodySize += chunk.length;
-      if (bodySize > MAX_BODY) {
-        if (!aborted) {
-          aborted = true;
-          res.writeHead(413, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: 0, msg: '数据过大（超过 5MB）' }));
-          req.destroy();
-        }
-        return;
-      }
-      body += chunk;
-    });
-    req.on('end', async () => {
-      if (aborted) return;
-      let savedToRedis = false;
-      let savedToFile = false;
-      let error = '';
-
-      // 1. 尝试写入 Redis
-      try {
-        if (redis && redisReady) {
-          await redis.set('app_data', body);
-          savedToRedis = true;
-        }
-      } catch (err) {
-        error = 'Redis 写入失败: ' + err.message;
-        console.error('❌ ' + error);
-      }
-
-      // 2. 同时写入文件作为备份
-      try {
-        writeFileData(body);
-        savedToFile = true;
-      } catch (err) {
-        console.error('❌ 文件写入失败:', err.message);
-      }
-
-      if (savedToRedis || savedToFile) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          ok: 1,
-          redis: savedToRedis,
-          file: savedToFile,
-          msg: savedToRedis ? '保存成功（Redis + 文件双备份）' : '保存成功（仅文件备份，Redis 不可用）',
-        }));
-      } else {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: 0, msg: '保存失败: ' + error }));
-      }
-    });
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405);
+    res.end('405 Method Not Allowed');
     return;
   }
 
-  // --------------------------
-  // 静态文件（防路径遍历）
-  // --------------------------
-  let filePath = url === '/' ? '/index.html' : url.split('?')[0];
-  const ext = path.extname(filePath);
+  const filePath = requestPath === '/' ? '/index.html' : requestPath;
   const resolved = path.resolve(path.join(__dirname, filePath));
-
-  // 确保文件路径不超出项目目录
-  if (!resolved.startsWith(__dirname + path.sep) && resolved !== __dirname) {
+  if (!resolved.startsWith(__dirname + path.sep)) {
     res.writeHead(403);
     res.end('403 Forbidden');
     return;
@@ -223,17 +90,18 @@ const server = http.createServer(async (req, res) => {
 
   fs.readFile(resolved, (err, content) => {
     if (err) {
-      res.writeHead(404);
-      res.end('404');
+      res.writeHead(err.code === 'ENOENT' ? 404 : 500);
+      res.end(err.code === 'ENOENT' ? '404' : '500');
       return;
     }
-    res.writeHead(200, { 'Content-Type': mime[ext] || 'text/html; charset=utf-8' });
-    res.end(content);
+    const ext = path.extname(resolved);
+    res.writeHead(200, { 'Content-Type': mime[ext] || 'application/octet-stream' });
+    if (req.method === 'HEAD') res.end();
+    else res.end(content);
   });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log('🚀 服务启动：端口 ' + PORT);
-  console.log('📦 Redis 状态: ' + (redisReady ? '已连接' : '未连接 — ' + (redisError || '等待中...')));
+  console.log('服务启动：端口 ' + PORT);
 });

@@ -11,17 +11,13 @@
     state.lastModified = Date.now();
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
   }
-  let saveTimer = null;
-  let serverLoaded = false;
 
   function defaultState() {
     return {
       tasks: [], schedule: {},
       settings: { provider: 'deepseek', baseUrl: '', apiKey: '', model: 'deepseek-chat' },
       tags: [], links: [], quotes: [], userInfo: { name: '' },
-      drops: { total: 0, history: [] },
       timeBlocks: [], habits: [], habitLogs: [], taskLogs: [],
-      shopItems: [], shopHistory: [],
       wakeSleep: {},
       lastDailyCheck: '', lastModified: 0,
     };
@@ -30,11 +26,10 @@
   function mergeState(raw) {
     const def = defaultState();
     const merged = { ...def, ...raw, settings: { ...def.settings, ...(raw.settings || {}) } };
-    ['tags','links','quotes','timeBlocks','habits','habitLogs','taskLogs','shopItems','shopHistory'].forEach(k => {
+    ['tags','links','quotes','timeBlocks','habits','habitLogs','taskLogs'].forEach(k => {
       if (!Array.isArray(merged[k])) merged[k] = def[k] || [];
     });
     if (!merged.userInfo) merged.userInfo = def.userInfo;
-    if (!merged.drops) merged.drops = def.drops;
     if (!merged.lastDailyCheck) merged.lastDailyCheck = '';
     if (!merged.wakeSleep) merged.wakeSleep = {};
     merged.timeBlocks.forEach(b => {
@@ -58,76 +53,14 @@
     return defaultState();
   }
 
-  // ===== SYNC =====
-  let syncPollInterval = null;
+  // 本地先响应，Railway Redis 负责持久化与跨设备恢复。
+  let serverLoaded = false;
+  let saveTimer = null;
   let isSaving = false;
 
   function setSyncStatus(status) {
     const dot = document.querySelector('.sync-dot');
-    if (!dot) return;
-    dot.className = 'sync-dot sync-' + status;
-  }
-
-  async function loadStateFromServer() {
-    try {
-      const res = await fetch('/api/data');
-      if (res.ok) {
-        const data = await res.json();
-        if (data && (data.tasks || data.settings)) {
-          const lc = (state.tasks||[]).length, sc = (data.tasks||[]).length;
-          const st = data.lastModified||0, lt = state.lastModified||0;
-          let useServer = lc === 0 || (sc > 0 && st > lt) || (sc >= lc && sc > 0);
-          if (sc === 0 && lc > 0) useServer = false;
-          if (useServer) {
-            state = mergeState(data);
-            if (!state.lastModified) state.lastModified = Date.now();
-            localStorage.setItem(STATE_KEY, JSON.stringify(state));
-          }
-          loadSettingsUI(); renderActiveView(); updateDropsDisplay();
-        }
-      }
-    } catch(e) {}
-    serverLoaded = true;
-    dailyMaintenance();
-    startSyncPolling();
-  }
-
-  function computeStateHash() {
-    const t = state.tasks||[], tg = state.tags||[], d = (state.drops||{}).total||0;
-    return t.map(x=>x.id+(x.done?'1':'0')+(x.sortOrder||0)+x.name+(x.date||'')+x.quadrant+(x.note||'')+(x.tags||[]).join(',')).join('|')+'##'+tg.map(x=>x.id+x.name+x.color).join('|')+'##'+d;
-  }
-
-  async function pollServerSync() {
-    if (!serverLoaded || saveTimer || isSaving) return;
-    if (!document.querySelector('.modal-overlay.hidden') === false) return;
-    try {
-      const res = await fetch('/api/data');
-      if (!res.ok) return;
-      const data = await res.json();
-      if (!data || typeof data !== 'object') return;
-      const sc = (data.tasks||[]).length, lc = (state.tasks||[]).length;
-      const st = data.lastModified||0, lt = state.lastModified||0;
-      if (lc > 0 && sc === 0) {
-        if (st > lt) { state = mergeState(data); localStorage.setItem(STATE_KEY, JSON.stringify(state)); renderActiveView(); updateDropsDisplay(); }
-        else saveToServer();
-        return;
-      }
-      if (st <= lt && st > 0) return;
-      const serverSig = (data.tasks||[]).map(x=>x.id+(x.done?'1':'0')+(x.sortOrder||0)+(x.name||'')+(x.date||'')+(x.quadrant||'')+(x.note||'')+(x.tags||[]).join(',')).join('|')+'##'+(data.tags||[]).map(x=>x.id+x.name+x.color).join('|')+'##'+((data.drops||{}).total||0);
-      if (serverSig === computeStateHash()) return;
-      state = mergeState(data); localStorage.setItem(STATE_KEY, JSON.stringify(state));
-      renderActiveView(); updateDropsDisplay();
-    } catch(e) {}
-  }
-
-  function startSyncPolling() {
-    syncPollInterval = setInterval(pollServerSync, 5000);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        pollServerSync();
-        if (state.lastDailyCheck !== todayKey()) { dailyMaintenance(); renderActiveView(); updateDropsDisplay(); }
-      }
-    });
+    if (dot) dot.className = 'sync-dot sync-' + status;
   }
 
   function saveState() {
@@ -136,16 +69,76 @@
     if (!serverLoaded) return;
     setSyncStatus('saving');
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveToServer, 300);
+    saveTimer = setTimeout(saveToServer, 400);
   }
 
   async function saveToServer() {
+    if (isSaving) return;
     isSaving = true;
     try {
-      const res = await fetch('/api/data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(state) });
+      const res = await fetch('/api/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state),
+      });
       setSyncStatus(res.ok ? 'ok' : 'offline');
-    } catch(e) { setSyncStatus('offline'); }
-    finally { isSaving = false; saveTimer = null; }
+    } catch (e) {
+      setSyncStatus('offline');
+    } finally {
+      isSaving = false;
+      saveTimer = null;
+    }
+  }
+
+  async function loadStateFromServer() {
+    try {
+      const res = await fetch('/api/data');
+      if (!res.ok) throw new Error('云端数据不可用');
+      const data = await res.json();
+      if (data && typeof data === 'object' && (data.lastModified || data.tasks || data.settings)) {
+        const localTime = state.lastModified || 0;
+        const remoteTime = data.lastModified || 0;
+        const localHasData = (state.tasks || []).length > 0
+          || (state.tags || []).length > 0
+          || (state.habits || []).length > 0
+          || (state.timeBlocks || []).length > 0
+          || (state.userInfo && state.userInfo.name);
+        if (!localHasData || remoteTime >= localTime || localTime === 0) {
+          state = mergeState(data);
+          localStorage.setItem(STATE_KEY, JSON.stringify(state));
+          loadSettingsUI();
+          renderActiveView();
+        }
+      }
+      setSyncStatus('ok');
+    } catch (e) {
+      setSyncStatus('offline');
+    } finally {
+      serverLoaded = true;
+      if (state.lastModified > 0 && !saveTimer) saveToServer();
+      startSyncPolling();
+    }
+  }
+
+  async function pollServerSync() {
+    if (!serverLoaded || saveTimer || isSaving) return;
+    try {
+      const res = await fetch('/api/data');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || (data.lastModified || 0) <= (state.lastModified || 0)) return;
+      state = mergeState(data);
+      localStorage.setItem(STATE_KEY, JSON.stringify(state));
+      loadSettingsUI();
+      renderActiveView();
+      setSyncStatus('ok');
+    } catch (e) {
+      setSyncStatus('offline');
+    }
+  }
+
+  function startSyncPolling() {
+    setInterval(pollServerSync, 10000);
   }
 
   // ===== HELPERS =====
@@ -181,33 +174,15 @@
   function updateTask(id, u) { const t = state.tasks.find(x => x.id === id); if (t) { Object.assign(t, u); saveState(); } }
   function deleteTask(id) { state.tasks = state.tasks.filter(x => x.id !== id); saveState(); }
 
-  const PRIORITY_WEIGHTS = { 'urgent-important': 4, 'important': 3, 'urgent': 2, 'neither': 1 };
   const PRIORITY_LABELS = { 'urgent-important': '重要紧急', 'important': '重要', 'urgent': '紧急', 'neither': '一般' };
   const PRIORITY_COLORS = { 'urgent-important': 'var(--q1)', 'important': 'var(--q2)', 'urgent': 'var(--q3)', 'neither': 'var(--q4)' };
-
-  function awardDrops(amount, reason) {
-    if (amount <= 0) return;
-    if (!state.drops) state.drops = { total: 0, history: [] };
-    state.drops.total += amount;
-    state.drops.history.push({ date: todayKey(), amount, reason });
-    saveState(); updateDropsDisplay();
-    showToast('+' + amount + ' 💧', 'success');
-  }
-  function updateDropsDisplay() {
-    const total = (state.drops&&state.drops.total)||0;
-    const els = { 'sidebar-drops-num': total, 'today-drops-num': total, 'drops-rules-total': '💧 '+total, 'shop-drops-num': total };
-    Object.entries(els).forEach(([id, v]) => { const el = document.getElementById(id); if (el) el.textContent = v; });
-  }
 
   function toggleDone(id) {
     const t = state.tasks.find(x => x.id === id); if (!t) return;
     const wasDone = t.done; t.done = !t.done; saveState();
     if (!wasDone && t.done) {
-      const w = PRIORITY_WEIGHTS[t.quadrant]||1;
-      const drops = Math.floor((t.duration||30)/60*w);
       if (!state.taskLogs) state.taskLogs = [];
-      state.taskLogs.push({ id:'tlog-'+genId(), taskId:t.id, name:t.name, quadrant:t.quadrant, duration:t.duration||30, date:todayKey(), dropsEarned:drops });
-      awardDrops(drops, '完成: '+t.name);
+      state.taskLogs.push({ id:'tlog-'+genId(), taskId:t.id, name:t.name, quadrant:t.quadrant, duration:t.duration||30, date:todayKey() });
     }
     renderActiveView();
   }
@@ -245,7 +220,7 @@
 
   const VIEW_RENDERERS = {
     today: renderToday, tasks: renderTasks, review: renderReview,
-    settings: () => { loadSettingsUI(); renderSettingsLists(); renderShop(); },
+    settings: () => { loadSettingsUI(); renderSettingsLists(); },
   };
 
   function getActiveViewName() {
@@ -288,13 +263,12 @@
     state.tasks.forEach(t => { if (t.recurrence && t.recurrence !== 'none' && t.date && t.date < today) { t.date = today; t.done = false; } });
     state.tasks = state.tasks.filter(t => !(t.done && t.date && t.date < today && (!t.recurrence || t.recurrence === 'none')));
     const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-90); const ck = localDateKey(cutoff);
-    ['taskLogs','habitLogs','shopHistory'].forEach(k => { if (state[k]) state[k] = state[k].filter(l => l.date >= ck); });
-    if (state.drops&&state.drops.history) state.drops.history = state.drops.history.filter(h => h.date >= ck);
+    ['taskLogs','habitLogs'].forEach(k => { if (state[k]) state[k] = state[k].filter(l => l.date >= ck); });
     state.lastDailyCheck = today; saveState();
   }
   function scheduleMidnightRefresh() {
     const now = new Date(), tmr = new Date(now.getFullYear(),now.getMonth(),now.getDate()+1,0,0,0);
-    setTimeout(() => { dailyMaintenance(); renderActiveView(); updateDropsDisplay(); scheduleMidnightRefresh(); }, tmr - now);
+    setTimeout(() => { dailyMaintenance(); renderActiveView(); scheduleMidnightRefresh(); }, tmr - now);
   }
 
   // ===== RENDER: TODAY VIEW =====
@@ -321,29 +295,6 @@
   applyTheme(getTheme());
   document.getElementById('theme-toggle-btn').addEventListener('click', () => applyTheme(getTheme()==='dark'?'light':'dark'));
 
-  // ===== DROPS MODAL =====
-  const dropsRulesOverlay = document.getElementById('drops-rules-overlay');
-  document.getElementById('sidebar-drops').addEventListener('click', () => { updateDropsDisplay(); dropsRulesOverlay.classList.remove('hidden'); });
-  document.getElementById('today-drops-badge').addEventListener('click', () => { updateDropsDisplay(); dropsRulesOverlay.classList.remove('hidden'); });
-  setupModalClose(dropsRulesOverlay, document.getElementById('drops-rules-close'));
-  const dropsHistoryList = document.getElementById('drops-history-list');
-  const btnToggleDropsHistory = document.getElementById('btn-toggle-drops-history');
-  btnToggleDropsHistory.addEventListener('click', () => {
-    const h = dropsHistoryList.style.display === 'none';
-    dropsHistoryList.style.display = h ? '' : 'none';
-    btnToggleDropsHistory.textContent = h ? '收起' : '展开';
-    if (h) renderDropsHistory();
-  });
-  function renderDropsHistory() {
-    const hist = (state.drops&&state.drops.history)||[];
-    dropsHistoryList.innerHTML = hist.length===0 ? '<div style="color:var(--text-muted);font-size:.8rem;padding:.5rem">暂无记录</div>' : '';
-    [...hist].reverse().forEach(h => {
-      const el = document.createElement('div'); el.className = 'drops-history-item';
-      el.innerHTML = `<span class="dhi-date">${h.date||'-'}</span><span class="dhi-amount${h.amount<0?' negative':''}">${h.amount>0?'+':''}${h.amount}</span><span class="dhi-reason">${esc(h.reason||'')}</span>`;
-      dropsHistoryList.appendChild(el);
-    });
-  }
-
   // ===== TODAY VIEW IMPL =====
   function renderTodayImpl() {
     const now = new Date(), h = now.getHours();
@@ -352,7 +303,6 @@
     document.getElementById('today-greeting').textContent = userName ? greeting+'，'+userName : greeting;
     const wd = ['周日','周一','周二','周三','周四','周五','周六'];
     document.getElementById('today-date').textContent = now.getFullYear()+'年'+(now.getMonth()+1)+'月'+now.getDate()+'日 '+wd[now.getDay()];
-    updateDropsDisplay();
 
     const today = todayKey();
     const todayTasks = state.tasks.filter(t => t.date === today);
@@ -364,9 +314,8 @@
     document.getElementById('stat-pending').textContent = pending;
     document.getElementById('stat-total').textContent = total;
 
-    // Today drops earned
-    const todayDrops = ((state.drops&&state.drops.history)||[]).filter(h => h.date===today&&h.amount>0).reduce((s,h)=>s+h.amount,0);
-    document.getElementById('stat-drops-today').textContent = todayDrops;
+    const focusMinutes = todayTasks.filter(t => t.done).reduce((sum, task) => sum + (task.duration || 0), 0);
+    document.getElementById('stat-focus-time').textContent = focusMinutes;
 
     // Progress ring
     const pct = total > 0 ? done / total : 0;
@@ -652,7 +601,6 @@
     document.getElementById('habit-edit-name').value=h?h.name:'';
     document.getElementById('habit-edit-type').value=h?h.type:'duration';
     document.getElementById('habit-edit-icon').value=h?h.icon:'';
-    document.getElementById('habit-edit-drops').value=h?h.dropsPerUnit:2;
     const sel=document.getElementById('habit-tag-selector'); sel.innerHTML='';
     const sTags=h?(h.tags||[]):[];
     (state.tags||[]).forEach(tag=>{const c=document.createElement('span');c.className='tag-chip'+(sTags.includes(tag.id)?' selected':'');c.style.cssText='background:'+tag.color+'22;color:'+tag.color;c.textContent=tag.name;c.dataset.tagId=tag.id;c.addEventListener('click',()=>c.classList.toggle('selected'));sel.appendChild(c);});
@@ -663,11 +611,10 @@
     const name=document.getElementById('habit-edit-name').value.trim(); if(!name){alert('请输入名称');return;}
     const type=document.getElementById('habit-edit-type').value;
     const icon=document.getElementById('habit-edit-icon').value.trim()||'🔄';
-    const dropsPerUnit=parseInt(document.getElementById('habit-edit-drops').value)||2;
     const tags=Array.from(document.querySelectorAll('#habit-tag-selector .tag-chip.selected')).map(el=>el.dataset.tagId);
     if(!state.habits) state.habits=[];
-    if(editingHabitId){const h=(state.habits).find(x=>x.id===editingHabitId);if(h){h.name=name;h.type=type;h.icon=icon;h.dropsPerUnit=dropsPerUnit;h.tags=tags;}}
-    else state.habits.push({id:'habit-'+genId(),name,type,icon,dropsPerUnit,tags,createdAt:new Date().toISOString()});
+    if(editingHabitId){const h=(state.habits).find(x=>x.id===editingHabitId);if(h){h.name=name;h.type=type;h.icon=icon;h.tags=tags;}}
+    else state.habits.push({id:'habit-'+genId(),name,type,icon,tags,createdAt:new Date().toISOString()});
     saveState(); habitModalOverlay.classList.add('hidden'); renderActiveView();
   });
   document.getElementById('btn-habit-delete').addEventListener('click', () => {
@@ -686,20 +633,16 @@
   function updateHabitLogPreview() {
     const h=(state.habits||[]).find(x=>x.id===loggingHabitId); if(!h) return;
     const v=parseFloat(document.getElementById('habit-log-value').value)||0;
-    const drops=h.type==='duration'?Math.max(v>0?1:0,Math.floor(v*h.dropsPerUnit)):Math.floor(v)*h.dropsPerUnit;
-    document.getElementById('habit-log-drops-preview').textContent='预计 💧 '+drops;
   }
   document.getElementById('habit-log-value').addEventListener('input', updateHabitLogPreview);
   setupModalClose(habitLogOverlay, document.getElementById('habit-log-close'));
   document.getElementById('btn-habit-log-save').addEventListener('click', () => {
     const h=(state.habits||[]).find(x=>x.id===loggingHabitId); if(!h) return;
     const v=parseFloat(document.getElementById('habit-log-value').value)||0; if(v<=0){alert('请输入有效数值');return;}
-    const drops=h.type==='duration'?Math.max(v>0?1:0,Math.floor(v*h.dropsPerUnit)):Math.floor(v)*h.dropsPerUnit;
     if(!state.habitLogs) state.habitLogs=[];
-    state.habitLogs.push({id:'hlog-'+genId(),habitId:h.id,date:todayKey(),value:v,dropsEarned:drops});
-    if(drops>0) awardDrops(drops, '习惯: '+h.name);
+    state.habitLogs.push({id:'hlog-'+genId(),habitId:h.id,date:todayKey(),value:v});
     saveState(); habitLogOverlay.classList.add('hidden'); renderActiveView();
-    showToast(h.icon+' +'+drops+' 💧', 'success');
+    showToast(h.icon+' 已记录', 'success');
   });
 
   // ===== TIME BLOCK MODAL =====
@@ -768,9 +711,8 @@
     const start = new Date(); start.setDate(start.getDate()-(days-1)); const startKey = localDateKey(start);
     const tl = (state.taskLogs||[]).filter(l=>l.date>=startKey&&l.date<=today);
     const hl = (state.habitLogs||[]).filter(l=>l.date>=startKey&&l.date<=today);
-    const de = ((state.drops&&state.drops.history)||[]).filter(h=>h.date>=startKey&&h.date<=today&&h.amount>0).reduce((s,h)=>s+h.amount,0);
     const statsDiv = document.getElementById('review-stats');
-    statsDiv.innerHTML = `<div class="review-stat-card"><div class="review-stat-num">${tl.length}</div><div class="review-stat-label">完成任务</div></div><div class="review-stat-card"><div class="review-stat-num">${hl.length}</div><div class="review-stat-label">习惯打卡</div></div><div class="review-stat-card review-stat-accent"><div class="review-stat-num">${de}</div><div class="review-stat-label">获得水滴</div></div>`;
+    statsDiv.innerHTML = `<div class="review-stat-card"><div class="review-stat-num">${tl.length}</div><div class="review-stat-label">完成任务</div></div><div class="review-stat-card"><div class="review-stat-num">${hl.length}</div><div class="review-stat-label">习惯打卡</div></div><div class="review-stat-card review-stat-accent"><div class="review-stat-num">${tl.reduce((sum, log) => sum + (log.duration || 0), 0)}</div><div class="review-stat-label">专注分钟</div></div>`;
 
     // Week grid
     const weekGrid = document.getElementById('review-week-grid');
@@ -810,21 +752,19 @@
     const hl = (state.habitLogs||[]).filter(l=>l.date>=sk&&l.date<=today);
     const pending = state.tasks.filter(t=>!t.done&&t.date&&t.date>=sk&&t.date<=today);
     let ctx = `范围: ${sk} ~ ${today}\n完成任务: ${tl.length}\n`;
-    tl.forEach(l=>{ctx+=`  - ${l.name} (${PRIORITY_LABELS[l.quadrant]||'一般'},${l.duration}分,+${l.dropsEarned}💧)\n`;});
+    tl.forEach(l=>{ctx+=`  - ${l.name} (${PRIORITY_LABELS[l.quadrant]||'一般'},${l.duration}分)\n`;});
     ctx += `待完成: ${pending.length}\n`;
     pending.forEach(t=>{ctx+=`  - ${t.name} (截止:${t.date})\n`;});
     ctx += `习惯打卡: ${hl.length}次\n`;
-    ctx += `水滴余额: ${(state.drops&&state.drops.total)||0}\n`;
     return ctx;
   }
   function buildSummaryTemplate(days) {
     const today = todayKey(); const start = new Date(); start.setDate(start.getDate()-(days-1)); const sk = localDateKey(start);
     const tl = (state.taskLogs||[]).filter(l=>l.date>=sk&&l.date<=today);
     const hl = (state.habitLogs||[]).filter(l=>l.date>=sk&&l.date<=today);
-    const de = ((state.drops&&state.drops.history)||[]).filter(h=>h.date>=sk&&h.date<=today&&h.amount>0).reduce((s,h)=>s+h.amount,0);
     let html = `<div class="summary-section"><h4>📊 概览 (${sk} ~ ${today})</h4><ul>`;
-    html += `<li>完成: <strong>${tl.length}</strong> 个任务</li><li>打卡: <strong>${hl.length}</strong> 次</li><li>水滴: <strong style="color:var(--cyan)">${de}</strong></li></ul></div>`;
-    if(tl.length>0){html+='<div class="summary-section"><h4>✅ 已完成</h4><ul>';tl.forEach(l=>{html+=`<li>${esc(l.name)} <span style="color:var(--text-muted)">(${l.duration}分,+${l.dropsEarned}💧)</span></li>`;});html+='</ul></div>';}
+    html += `<li>完成: <strong>${tl.length}</strong> 个任务</li><li>打卡: <strong>${hl.length}</strong> 次</li><li>专注: <strong>${tl.reduce((sum, log) => sum + (log.duration || 0), 0)}</strong> 分钟</li></ul></div>`;
+    if(tl.length>0){html+='<div class="summary-section"><h4>✅ 已完成</h4><ul>';tl.forEach(l=>{html+=`<li>${esc(l.name)} <span style="color:var(--text-muted)">(${l.duration}分)</span></li>`;});html+='</ul></div>';}
     return html;
   }
 
@@ -899,52 +839,6 @@
     state.tags.push({id:'tag-'+genId(),name,color:ci.value});saveState();ni.value='';renderTagSettings();
   });
 
-  // ===== SHOP =====
-  function renderShop(){
-    const grid=document.getElementById('shop-grid'),hist=document.getElementById('shop-history');
-    if(!grid) return;
-    const drops=(state.drops&&state.drops.total)||0;
-    document.getElementById('shop-drops-num').textContent=drops;
-    const items=state.shopItems||[];
-    grid.innerHTML='';
-    items.forEach(item=>{
-      const canBuy=drops>=item.price&&item.stock!==0, soldOut=item.stock===0;
-      const el=document.createElement('div');el.className='shop-item-compact';
-      el.innerHTML=`<button class="shop-item-edit-btn" title="编辑">✏️</button><div class="shop-item-icon">${item.icon||'🎁'}</div><div class="shop-item-name">${esc(item.name)}</div><div class="shop-item-price">💧 ${item.price}</div><button class="btn-shop-buy" ${!canBuy?'disabled':''}>${soldOut?'售罄':'兑换'}</button>`;
-      el.querySelector('.btn-shop-buy').addEventListener('click',()=>buyShopItem(item.id));
-      el.querySelector('.shop-item-edit-btn').addEventListener('click',()=>openShopEditModal(item.id));
-      grid.appendChild(el);
-    });
-    hist.innerHTML='';
-    const history=state.shopHistory||[];
-    if(history.length===0){hist.innerHTML='<div style="color:var(--text-muted);font-size:.75rem;padding:.4rem">暂无记录</div>';}
-    else [...history].reverse().forEach(h=>{const el=document.createElement('div');el.className='shop-history-item';el.innerHTML=`<span class="shi-date">${h.date}</span><span class="shi-name">${h.icon||'🎁'} ${esc(h.name)}</span><span class="shi-price">-💧${h.price}</span>`;hist.appendChild(el);});
-  }
-  function buyShopItem(id){
-    const items=state.shopItems||[];const item=items.find(i=>i.id===id);if(!item)return;
-    const drops=(state.drops&&state.drops.total)||0;
-    if(drops<item.price){showToast('水滴不足','error');return;}
-    if(item.stock===0){showToast('已售罄','error');return;}
-    state.drops.total-=item.price;state.drops.history.push({date:todayKey(),amount:-item.price,reason:'兑换: '+item.name});
-    if(item.stock>0)item.stock--;
-    if(!state.shopHistory)state.shopHistory=[];
-    state.shopHistory.push({date:todayKey(),name:item.name,icon:item.icon,price:item.price});
-    saveState();updateDropsDisplay();renderShop();showToast('兑换成功！'+item.icon,'success');
-  }
-  document.getElementById('btn-shop-add').addEventListener('click',()=>{
-    const ni=document.getElementById('shop-new-name'),pi=document.getElementById('shop-new-price'),ii=document.getElementById('shop-new-icon');
-    const name=ni.value.trim(),price=parseInt(pi.value),icon=ii.value.trim()||'🎁';
-    if(!name){showToast('请输入名称','error');return;}if(!price||price<=0){showToast('请输入价格','error');return;}
-    if(!state.shopItems)state.shopItems=[];
-    state.shopItems.push({id:'shop-'+genId(),name,icon,price,stock:-1});saveState();ni.value='';pi.value='';ii.value='';renderShop();
-  });
-  let editingShopItemId=null;
-  const shopEditOverlay=document.getElementById('shop-edit-overlay');
-  setupModalClose(shopEditOverlay,document.getElementById('shop-edit-close'));
-  function openShopEditModal(id){editingShopItemId=id;const item=(state.shopItems||[]).find(i=>i.id===id);if(!item)return;document.getElementById('shop-edit-name').value=item.name;document.getElementById('shop-edit-price').value=item.price;document.getElementById('shop-edit-icon').value=item.icon||'';shopEditOverlay.classList.remove('hidden');}
-  document.getElementById('btn-shop-edit-save').addEventListener('click',()=>{if(!editingShopItemId)return;const name=document.getElementById('shop-edit-name').value.trim();if(!name)return;const price=parseInt(document.getElementById('shop-edit-price').value);if(!price||price<=0)return;const icon=document.getElementById('shop-edit-icon').value.trim()||'🎁';const item=(state.shopItems||[]).find(i=>i.id===editingShopItemId);if(item){item.name=name;item.price=price;item.icon=icon;}saveState();shopEditOverlay.classList.add('hidden');renderShop();});
-  document.getElementById('btn-shop-edit-delete').addEventListener('click',()=>{if(!editingShopItemId)return;if(confirm('删除？')){state.shopItems=(state.shopItems||[]).filter(i=>i.id!==editingShopItemId);saveState();shopEditOverlay.classList.add('hidden');renderShop();}});
-
   // ===== DATA IMPORT/EXPORT =====
   document.getElementById('btn-export').addEventListener('click',()=>{
     const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);
@@ -955,18 +849,16 @@
   document.getElementById('btn-import').addEventListener('click',()=>{importFile.value='';importFile.click();});
   importFile.addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{pendingImportData=JSON.parse(ev.target.result);importModeOverlay.classList.remove('hidden');}catch(err){alert('无效文件');}};r.readAsText(f);});
   setupModalClose(importModeOverlay,document.getElementById('import-mode-close'));
-  document.getElementById('import-mode-overwrite').addEventListener('click',()=>{if(!pendingImportData)return;importModeOverlay.classList.add('hidden');state=mergeState(pendingImportData);pendingImportData=null;saveState();loadSettingsUI();renderActiveView();updateDropsDisplay();alert('导入成功！');});
+  document.getElementById('import-mode-overwrite').addEventListener('click',()=>{if(!pendingImportData)return;importModeOverlay.classList.add('hidden');state=mergeState(pendingImportData);pendingImportData=null;saveState();loadSettingsUI();renderActiveView();alert('导入成功！');});
   document.getElementById('import-mode-merge').addEventListener('click',()=>{
     if(!pendingImportData)return;importModeOverlay.classList.add('hidden');const imp=mergeState(pendingImportData);pendingImportData=null;
     const eids=new Set((state.tasks||[]).map(t=>t.id));(imp.tasks||[]).forEach(t=>{if(!eids.has(t.id))state.tasks.push(t);});
     const etids=new Set((state.tags||[]).map(t=>t.id));(imp.tags||[]).forEach(t=>{if(!etids.has(t.id))state.tags.push(t);});
-    if(imp.drops){if(!state.drops)state.drops={total:0,history:[]};state.drops.total=Math.max(state.drops.total,imp.drops.total||0);}
-    saveState();loadSettingsUI();renderActiveView();updateDropsDisplay();alert('合并成功！');
+    saveState();loadSettingsUI();renderActiveView();alert('合并成功！');
   });
   document.getElementById('btn-clear-data').addEventListener('click',()=>{
     if(confirm('清除所有数据？不可恢复。')){
       state=defaultState();state.lastModified=Date.now();localStorage.setItem(STATE_KEY,JSON.stringify(state));
-      if(serverLoaded)fetch('/api/data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(state)}).catch(()=>{});
       loadSettingsUI();alert('已清除');switchView('today');
     }
   });
@@ -974,12 +866,13 @@
   // ===== MANUAL REFRESH =====
   document.getElementById('btn-manual-refresh').addEventListener('click',function(){
     this.classList.add('refreshing');this.disabled=true;
-    state.lastDailyCheck='';dailyMaintenance();renderActiveView();updateDropsDisplay();
+    state.lastDailyCheck='';dailyMaintenance();renderActiveView();
     setTimeout(()=>{this.classList.remove('refreshing');this.disabled=false;},800);
   });
 
   // ===== INIT =====
-  loadSettingsUI(); renderToday(); updateDropsDisplay();
+  loadSettingsUI(); renderToday();
+  dailyMaintenance();
   loadStateFromServer();
   scheduleMidnightRefresh();
 

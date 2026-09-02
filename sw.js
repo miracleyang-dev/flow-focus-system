@@ -1,5 +1,5 @@
 // ===== 心流 PWA Service Worker =====
-const CACHE_NAME = 'xinliu-v9';
+const CACHE_NAME = 'xinliu-v10';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -33,24 +33,12 @@ self.addEventListener('activate', (event) => {
 });
 
 // Fetch strategy:
-// - /api/* → Network first, no cache (always sync with server)
 // - Static assets → Cache first, fallback to network
 // - External (fonts, LLM API) → Network only
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
   // API requests: network only (server sync)
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(event.request).catch(() => {
-        return new Response('{"error":"offline"}', {
-          status: 503,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      })
-    );
-    return;
-  }
 
   // External requests (fonts, LLM APIs): network only, don't cache
   if (url.origin !== self.location.origin) {
